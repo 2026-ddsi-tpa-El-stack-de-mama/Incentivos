@@ -1,18 +1,19 @@
-package ar.edu.utn.dds.k3003.repositories;
+package ar.edu.utn.dds.k3003.repositories.donadores;
 
 import ar.edu.utn.dds.k3003.model.Donador;
+import lombok.val;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
-import lombok.val;
 
-public class InMemoryDonadoresRepo implements DonadoresRepository {
+public class InMemoryDonadoresRepository implements DonadoresRepository {
 
   private List<Donador> donadores;
   private AtomicLong idSecuencial = new AtomicLong(1);
 
-  public InMemoryDonadoresRepo() {
+  public InMemoryDonadoresRepository() {
     this.donadores = new ArrayList<>();
   }
 

@@ -1,6 +1,7 @@
-package ar.edu.utn.dds.k3003.repositories;
+package ar.edu.utn.dds.k3003.repositories.donadores;
 
 import ar.edu.utn.dds.k3003.model.Donador;
+
 import java.util.Optional;
 
 public interface DonadoresRepository {

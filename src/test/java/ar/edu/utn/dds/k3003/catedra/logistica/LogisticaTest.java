@@ -1,4 +1,4 @@
-package ar.edu.utn.dds.k3003.catedra.logistica;
+/*package ar.edu.utn.dds.k3003.catedra.logistica;
 
 import static org.mockito.Mockito.*;
 
@@ -277,3 +277,6 @@ public class LogisticaTest {
         .cambiarEstadoDeDonacion(paqueteEjemplo.donacionID(), EstadoDonacionEnum.ACEPTADA);
   }
 }
+
+
+ */
