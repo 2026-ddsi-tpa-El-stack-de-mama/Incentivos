@@ -22,6 +22,7 @@ class Asignacion {
         -String direccion
         -Integer capacidadMaxima
         -List~Paquete~ stockActual
+        -TipoAlgoritmoEnum tipoAlgoritmo
         +addPaquete(Paquete): Boolean
         +getCapacidadDisponible(): Integer
     }
@@ -73,7 +74,44 @@ class Asignacion {
         -Integer cantidadObjetivo
         -String productoID
         -Integer cantidadRecibida
+        -TipoNecesidadMaterialEnum tipoNecesidad
+
     }
+    
+    
+class TipoAlgoritmoEnum {
+    <<enumeration>>
+    SUB_ATENDIDOS
+    PRIORIDAD_POR_SCORE
+}
+
+class EstadoAsginacionEnum {
+    <<enumeration>>
+    ASIGNADA
+    COMPLETADA
+   
+}
+
+class EstadoDonacionEnum {
+    <<enumeration>>
+    INGRESADA   
+    ACEPTADA
+    CONQUEJA
+}
+
+class EstadoDonadorEnum {
+    <<enumeration>>
+    VERIFICADO
+    SOSPECHOSO
+    BANEADO
+}
+
+class TipoNecesidadMaterialEnum {
+    <<enumeration>>
+    EXTRAORDINARIA
+    RECURRENTE
+}
+
 
     Asignacion "1" --> "*" HistorialEstadoAsignacion : historialEstados
     Deposito "1" --> "*" Paquete : stockActual
@@ -85,3 +123,10 @@ class Asignacion {
     Asignacion "1" -- "1" Paquete : vincula
     Asignacion "1" -- "1" Necesidad : satisface
     Deposito "1" --* "*" Paquete : almacena
+
+Deposito --|> TipoAlgoritmoEnum
+Asignacion --|> EstadoAsginacionEnum
+HistorialEstadoAsignacion --|> EstadoAsginacionEnum
+Donacion --|> EstadoDonacionEnum
+Donador --|> EstadoDonadorEnum
+Necesidad --|> TipoNecesidadMaterialEnum

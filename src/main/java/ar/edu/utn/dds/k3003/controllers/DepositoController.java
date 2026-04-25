@@ -31,7 +31,7 @@ public class DepositoController {
         try {
             List<DepositoDTO> depositos = fachada.obtenerDepositos();
             return depositos != null && !depositos.isEmpty()
-                    ? ResponseEntity.ok(fachada.obtenerDepositos())
+                    ? ResponseEntity.ok(depositos)
                     : ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         } catch (Exception ex) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error retrieving depositos: " + ex.getMessage());
@@ -44,7 +44,7 @@ public class DepositoController {
             DepositoDTO depositoDTO = new DepositoDTO("", null, deposito.nombre(), deposito.direccion(),
                     deposito.capacidadMaxima(), null);
             fachada.agregarDeposito(depositoDTO);
-            return ResponseEntity.status(HttpStatus.CREATED).build();
+            return ResponseEntity.status(HttpStatus.CREATED).body(depositoDTO);
         } catch (Exception ex) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error creating deposito: " + ex.getMessage());
         }
@@ -66,7 +66,7 @@ public class DepositoController {
     public ResponseEntity<?> deleteDepositoByID(@PathVariable("id") String depositoID) {
         try {
             DepositoDTO depositoDTO = fachada.deleteDepositoByID(depositoID);
-            return depositoDTO != null ? ResponseEntity.ok(depositoDTO) :
+            return depositoDTO != null ? ResponseEntity.status(HttpStatus.NO_CONTENT).build() :
                     ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         } catch (Exception ex) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error deleting deposito: " + ex.getMessage());

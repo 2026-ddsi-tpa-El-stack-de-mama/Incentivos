@@ -82,6 +82,8 @@ public class Fachada implements FachadaLogistica {
     this.donacionRepository = donacionRepository;
     this.asignacionRepository = asignacionRepository;
     this.donadoresYEntidadesDataMapper = new DonadoresYEntidadesDataMapper();
+    this.necesidadMaterialService = new NecesidadMaterialService();
+
   }
 
 
@@ -177,7 +179,11 @@ public class Fachada implements FachadaLogistica {
 
   @Override
   public void setAlgoritmoMM(String depositoID, TipoAlgoritmoEnum tipoAlgoritmoEnum) {
-      this.depositoRepository.findById(depositoID).ifPresent(deposito -> deposito.setTipoAlgoritmo(tipoAlgoritmoEnum));
+      Optional<Deposito> deposito = this.depositoRepository.findById(depositoID);
+      if(deposito.isEmpty()) throw new RuntimeException("Deposito no existe:");
+      Deposito dep = deposito.get();
+      dep.setTipoAlgoritmo(tipoAlgoritmoEnum);
+      this.depositoRepository.modifyById(depositoID, dep);
   }
 
   @Override

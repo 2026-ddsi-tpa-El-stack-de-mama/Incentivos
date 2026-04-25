@@ -20,6 +20,7 @@ import org.mockito.Mock;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.util.ArrayList;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -53,8 +54,6 @@ public class FachadaLogisticaTest {
         fachadaLogistica = new Fachada(mockDepositoRepo, mockNecesidadesRepo, mockPaquetesRepo, mockDonacionRepo, mockAsignacionRepo);
         this.fachadaLogistica.setFachadaDonaciones(fachadaDonaciones);
         this.fachadaLogistica.setFachadaDonadoresYEntidades(fachadaDonadoresYEntidades);
-        this.fachadaLogistica.setAlgoritmoMM("", TipoAlgoritmoEnum.PRIORIDAD_POR_SCORE);
-
     }
 
     @Test
@@ -125,6 +124,7 @@ public class FachadaLogisticaTest {
 
         // 3. Mockear Depósito
         Deposito mockDepo = new Deposito(depoId, "Nombre", "Direccion", 100, null);
+        mockDepo.setTipoAlgoritmo(TipoAlgoritmoEnum.PRIORIDAD_POR_SCORE);
         when(mockDepositoRepo.findById(depoId)).thenReturn(Optional.of(mockDepo));
 
         when(mockNecesidadesRepo.doesNecesityExist(prodId)).thenReturn(true);
@@ -191,8 +191,6 @@ public class FachadaLogisticaTest {
         Necesidad mockNec2 = new Necesidad("nec2", "ent2", 2, "desc2", 100, prodId, 70, TipoNecesidadMaterialEnum.EXTRAORDINARIA);
         when(mockNecesidadesRepo.findAll()).thenReturn(List.of(mockNec1, mockNec2));
 
-        fachadaLogistica.setAlgoritmoMM("", TipoAlgoritmoEnum.PRIORIDAD_POR_SCORE);
-
         NecesidadMaterialDTO necesidadDeEntidadDTO1 = new NecesidadMaterialDTO(
                 mockNec1.getId(),
                 mockNec1.getEntidadID(),
@@ -222,15 +220,111 @@ public class FachadaLogisticaTest {
 
         PaqueteDTO paquete = new PaqueteDTO("1", "don1", prodId, 60);
 
+        Deposito depo = new Deposito("expectedDepositoId", "Nombre", "Direccion", 100, null);
+        depo.setTipoAlgoritmo(TipoAlgoritmoEnum.SUB_ATENDIDOS);
+        when(mockDepositoRepo.findById("expectedDepositoId")).thenReturn(Optional.of(depo));
+
 
 
         // 4. Ejecución
-        AsignacionDTO asignacion = fachadaLogistica.ejecutarMatchmaking("", paquete, List.of(necesidadDeEntidadDTO1, necesidadDeEntidadDTO2));
+        AsignacionDTO asignacion = fachadaLogistica.ejecutarMatchmaking("expectedDepositoId", paquete, List.of(necesidadDeEntidadDTO1, necesidadDeEntidadDTO2));
 
 
 
         // 5. Verificaciones
         assertNotNull(asignacion);
         assertEquals("nec1", asignacion.necesidadID());
+    }
+
+    @Test
+    public void testObtenerDepositos_ReturnsDepositoList() {
+        Deposito deposito = new Deposito("1", "Deposito Central", "dir1", 100, new ArrayList<>());
+
+        when(mockDepositoRepo.findAll()).thenReturn(List.of(deposito));
+
+        List<DepositoDTO> result = fachadaLogistica.obtenerDepositos();
+
+        assertEquals(1, result.size());
+        assertEquals("Deposito Central", result.get(0).nombre());
+        verify(mockDepositoRepo).findAll();
+    }
+
+    @Test
+    public void testDeleteDepositoByID_Success() {
+        Deposito deposito = new Deposito("1", "Deposito Central", "Direccion 123", 100, new ArrayList<>());
+
+
+        when(mockDepositoRepo.findById("1")).thenReturn(Optional.of(deposito));
+        when(mockDepositoRepo.deleteById("1")).thenReturn(deposito);
+
+        DepositoDTO deleted = fachadaLogistica.deleteDepositoByID("1");
+        assertNotNull(deleted);
+        assertEquals("1", deleted.id());
+        verify(mockDepositoRepo).deleteById("1");
+    }
+
+    @Test
+    public void testBuscarAsignacionPorID_Success() {
+        Asignacion asignacion = new Asignacion("A1", "P1", "N1", LocalDateTime.now(), EstadoAsginacionEnum.ASIGNADA);
+
+        when(mockAsignacionRepo.findById("A1")).thenReturn(Optional.of(asignacion));
+
+        AsignacionDTO result = fachadaLogistica.buscarAsignacionPorID("A1");
+        assertNotNull(result);
+        assertEquals("A1", result.id());
+        verify(mockAsignacionRepo).findById("A1");
+    }
+
+    @Test
+    public void testSetAlgoritmoMM_SetsAlgorithm() {
+        Deposito deposito = new Deposito("3", "Dep algo", "Calle", 15, new ArrayList<>());
+        when(mockDepositoRepo.findById("3")).thenReturn(Optional.of(deposito));
+
+        fachadaLogistica.setAlgoritmoMM("3", TipoAlgoritmoEnum.PRIORIDAD_POR_SCORE);
+
+        assertEquals(TipoAlgoritmoEnum.PRIORIDAD_POR_SCORE, deposito.getTipoAlgoritmo());
+        verify(mockDepositoRepo).findById("3");
+        verify(mockDepositoRepo).modifyById(eq("3"), any(Deposito.class));
+    }
+
+
+    @Test
+    public void testSetFachadaDonadoresYEntidades_SetsDependency() {
+        FachadaDonadoresYEntidades mockFachada = mock(FachadaDonadoresYEntidades.class);
+        fachadaLogistica.setFachadaDonadoresYEntidades(mockFachada);
+    }
+
+    @Test
+    public void testSetFachadaDonaciones_SetsDependency() {
+        FachadaDonaciones mockFachada = mock(FachadaDonaciones.class);
+        fachadaLogistica.setFachadaDonaciones(mockFachada);
+    }
+
+    @Test
+    public void testAgregarNecesidadMaterial_Success() {
+        NecesidadMaterialDTO dto = new NecesidadMaterialDTO("n1", "entidad1", 1, "desc", 10, "prod1", TipoNecesidadMaterialEnum.EXTRAORDINARIA);
+        Necesidad necesidad = new Necesidad("n1", "entidad1", 1, "desc", 10, "prod1", 0, TipoNecesidadMaterialEnum.EXTRAORDINARIA);
+
+        when(mockNecesidadesRepo.save(any(Necesidad.class))).thenReturn(necesidad);
+
+        NecesidadMaterialDTO result = fachadaLogistica.agregarNecesidadMaterial(dto);
+
+        assertNotNull(result);
+        assertEquals("n1", result.id());
+        verify(mockNecesidadesRepo).save(any(Necesidad.class));
+    }
+
+    @Test
+    public void testBuscarPaquetePorID_Success() {
+        String paqueteId = "p123";
+        Paquete paquete = new Paquete(paqueteId, "d1", "prodX", 8, "entidad1");
+
+        when(mockPaquetesRepo.findById(paqueteId)).thenReturn(Optional.of(paquete));
+
+        PaqueteDTO result = fachadaLogistica.buscarPaquetePorID(paqueteId);
+
+        assertNotNull(result);
+        assertEquals(paqueteId, result.id());
+        verify(mockPaquetesRepo).findById(paqueteId);
     }
 }
