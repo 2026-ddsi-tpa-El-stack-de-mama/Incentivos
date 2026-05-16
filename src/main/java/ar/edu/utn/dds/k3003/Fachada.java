@@ -1,37 +1,37 @@
 package ar.edu.utn.dds.k3003;
 
-import static java.util.UUID.randomUUID;
-
 import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.DonacionDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.EstadoDonacionEnum;
+import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.ProductoDTO;
+import ar.edu.utn.dds.k3003.catedra.dtos.donadoresYEntidades.DonadorDTO;
+import ar.edu.utn.dds.k3003.catedra.dtos.donadoresYEntidades.NecesidadMaterialDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.*;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonadoresYEntidades;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaIncentivos;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonaciones;
 import ar.edu.utn.dds.k3003.repositories.incentivos.IncentivosMapper;
+import ar.edu.utn.dds.k3003.repositories.incentivos.InMemoryAsignacionesIncentivosRepo;
+import ar.edu.utn.dds.k3003.repositories.incentivos.InMemoryInsigniasRepo;
+import ar.edu.utn.dds.k3003.repositories.incentivos.InMemoryMisionesRepo;
 import ar.edu.utn.dds.k3003.model.incentivos.Insignia;
 import ar.edu.utn.dds.k3003.model.incentivos.Mision;
 import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.stream.Collectors;
 
 @Service
 public class Fachada implements FachadaIncentivos {
 
-  // colecciones en memoria para incentivos (despues cambio por respositorios)
-  private Map<String, Insignia> insignias = new HashMap<>();
-  private Map<String, Mision> misiones = new HashMap<>();
-  // guardamos listas de ids de insignias por donador internamente
-  private Map<String, List<String>> insigniasPorDonador = new HashMap<>();
-  private Map<String, String> misionPorDonador = new HashMap<>();
-  // historial de categorias por donador (trazabilidad)
-  private Map<String, List<String>> categoriasPorDonador = new HashMap<>();
+  private final InMemoryInsigniasRepo insigniasRepo = InMemoryInsigniasRepo.getInstance();
+  private final InMemoryMisionesRepo misionesRepo = InMemoryMisionesRepo.getInstance();
+  private final InMemoryAsignacionesIncentivosRepo asignacionesRepo =
+      InMemoryAsignacionesIncentivosRepo.getInstance();
 
   private FachadaDonadoresYEntidades fachadaDonadoresYEntidades;
   private FachadaDonaciones fachadaDonaciones;
@@ -44,13 +44,11 @@ public class Fachada implements FachadaIncentivos {
     Si necesitan un constructor con parametros
     Java permite tener varios constructores conviviendo sin conflictos.
     */
+    insigniasRepo.clear();
+    misionesRepo.clear();
+    asignacionesRepo.clear();
   }
   // INCENTIVOS ------------------------------------------------------
-
-  // esto eventualmente vuela y el id autoasigna desde el repositorio
-  private String generarId() {
-    return randomUUID().toString();
-  }
 
   // ar.edu.utn.dds.k3003.catedra.dtos.incentivos.InsigniaDTO
   @Override
@@ -59,39 +57,31 @@ public class Fachada implements FachadaIncentivos {
       throw new RuntimeException("Insignia nula");
     }
 
-    if (insignia.id() != null && insignias.containsKey(insignia.id())) {
+    if (insignia.id() != null && insigniasRepo.existsById(insignia.id())) {
       throw new RuntimeException("Insignia ya existe");
     }
 
     var ent = IncentivosMapper.toEntity(insignia);
-    String id = ent.getId();
-    if (id == null) {
-      id = generarId();
-      ent.setId(id);
-    }
-    insignias.put(id, ent);
-    return IncentivosMapper.toDto(ent);
+    return IncentivosMapper.toDto(insigniasRepo.save(ent));
   }
 
   public InsigniaDTO modificarInsignia(InsigniaDTO insignia) {
     if (insignia == null) {
       throw new RuntimeException("Insignia nula");
     }
-    if (!insignias.containsKey(insignia.id())) {
+    if (insignia.id() == null || !insigniasRepo.existsById(insignia.id())) {
       throw new RuntimeException("Insignia inexistente");
     }
     var ent = IncentivosMapper.toEntity(insignia);
-    insignias.put(ent.getId(), ent);
-    return IncentivosMapper.toDto(ent);
+    return IncentivosMapper.toDto(insigniasRepo.save(ent));
   }
 
   public void eliminarInsignia(String insigniaID) {
-    if (insigniaID == null || !insignias.containsKey(insigniaID)) {
+    if (insigniaID == null || !insigniasRepo.existsById(insigniaID)) {
       throw new RuntimeException("Insignia inexistente");
     }
-    insignias.remove(insigniaID);
-    // quitar referencias de donadores
-    insigniasPorDonador.values().forEach(list -> list.removeIf(id -> id.equals(insigniaID)));
+    insigniasRepo.deleteById(insigniaID);
+    asignacionesRepo.removeInsignia(insigniaID);
   }
 
   @Override
@@ -101,98 +91,103 @@ public class Fachada implements FachadaIncentivos {
       throw new RuntimeException("Mision nula");
     }
 
-    if (mision.id() != null && misiones.containsKey(mision.id())) {
+    if (mision.id() != null && misionesRepo.existsById(mision.id())) {
       throw new RuntimeException("Mision ya existe");
     }
 
     var ent = IncentivosMapper.toEntity(mision);
-    String mision_id = ent.getId();
-    if (mision_id == null) {
-      mision_id = generarId();
-      ent.setId(mision_id);
-    }
     // todo validar que la insignia referenciada exista (elimine la validacion pq sino no pasan los tests de catedra)
 
-    misiones.put(mision_id, ent);
-    return IncentivosMapper.toDto(ent);
+    return IncentivosMapper.toDto(misionesRepo.save(ent));
   }
 
   public MisionDTO modificarMision(MisionDTO mision) {
     if (mision == null || mision.id() == null) {
       throw new RuntimeException("Mision nula o sin id");
     }
-    if (!misiones.containsKey(mision.id())) {
+    if (!misionesRepo.existsById(mision.id())) {
       throw new RuntimeException("Mision inexistente");
     }
     var ent = IncentivosMapper.toEntity(mision);
-    misiones.put(ent.getId(), ent);
-    return IncentivosMapper.toDto(ent);
+    return IncentivosMapper.toDto(misionesRepo.save(ent));
   }
 
   public void eliminarMision(String misionID) {
-    if (misionID == null || !misiones.containsKey(misionID)) {
+    if (misionID == null || !misionesRepo.existsById(misionID)) {
       throw new RuntimeException("Mision inexistente");
     }
-    misiones.remove(misionID);
-    // quitar referencias de donadores
-    misionPorDonador.values().removeIf(id -> id.equals(misionID));
+    misionesRepo.deleteById(misionID);
+    asignacionesRepo.removeMisionById(misionID);
   }
 
   // listado para consultar existentes
   public List<InsigniaDTO> listarInsignias() {
-    return insignias.values().stream().map(IncentivosMapper::toDto).collect(Collectors.toList());
+    return insigniasRepo.findAll().stream().map(IncentivosMapper::toDto).collect(Collectors.toList());
+  }
+
+  public InsigniaDTO buscarInsigniaPorID(String insigniaID) {
+    if (insigniaID == null) {
+      throw new NoSuchElementException("Insignia inexistente");
+    }
+    return IncentivosMapper.toDto(insigniasRepo.findById(insigniaID)
+        .orElseThrow(() -> new NoSuchElementException("Insignia inexistente")));
   }
 
   public List<MisionDTO> listarMisiones() {
-    return misiones.values().stream().map(IncentivosMapper::toDto).collect(Collectors.toList());
+    return misionesRepo.findAll().stream().map(IncentivosMapper::toDto).collect(Collectors.toList());
+  }
+
+  public MisionDTO buscarMisionPorID(String misionID) {
+    if (misionID == null) {
+      throw new NoSuchElementException("Mision inexistente");
+    }
+    return IncentivosMapper.toDto(misionesRepo.findById(misionID)
+        .orElseThrow(() -> new NoSuchElementException("Mision inexistente")));
   }
 
   @Override
   public List<InsigniaDTO> getInsigniasDeDonador(String donadorID) throws NoSuchElementException {
-    // Si ya tenemos insignias en memoria para el donador, devolverlas sin consultar la fachada
-    if (insigniasPorDonador.containsKey(donadorID)) {
-      var ids = insigniasPorDonador.getOrDefault(donadorID, List.of());
-      var lista = new ArrayList<InsigniaDTO>();
-      for (var id : ids) {
-        var ent = insignias.get(id);
-        if (ent != null) lista.add(IncentivosMapper.toDto(ent));
+    var ids = asignacionesRepo.getInsignias(donadorID);
+    if (ids == null || ids.isEmpty()) {
+      try {
+        var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
+        if (don == null) {
+          throw new NoSuchElementException("Donador inexistente");
+        }
+      } catch (RuntimeException e) {
+        throw new RuntimeException(e);
       }
-      return lista;
+      return List.of();
     }
 
-    // Si no existen insignias en memoria, verificar que el donador exista (esto puede lanzar excepcion o devolver null)
-    try {
-      var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
-      if (don == null) {
-        throw new RuntimeException("Donador inexistente");
+    var lista = new ArrayList<InsigniaDTO>();
+    for (var id : ids) {
+      var ent = insigniasRepo.findById(id).orElse(null);
+      if (ent != null) {
+        lista.add(IncentivosMapper.toDto(ent));
       }
-    } catch (RuntimeException e) {
-      throw new RuntimeException(e);
     }
 
-    return List.of();
+    return lista;
   }
 
   @Override
   public MisionDTO getMisionEnCursoDeDonador(String donadorID) throws NoSuchElementException {
-    // Si ya hay una mision asignada en memoria, devolverla sin consultar la fachada
-    if (misionPorDonador.containsKey(donadorID)) {
-      var mid = misionPorDonador.get(donadorID);
-      var ent = misiones.get(mid);
-      return IncentivosMapper.toDto(ent);
-    }
-
-    // Si no hay mision en memoria, validar que el donador exista (esto puede lanzar excepcion o devolver null)
-    try {
-      var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
-      if (don == null) {
-        throw new RuntimeException("Donador inexistente");
+    var mid = asignacionesRepo.getMision(donadorID);
+    if (mid == null) {
+      try {
+        var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
+        if (don == null) {
+          throw new NoSuchElementException("Donador inexistente");
+        }
+      } catch (RuntimeException e) {
+        throw new RuntimeException(e);
       }
-    } catch (RuntimeException e) {
-      throw new RuntimeException(e);
+      return null;
     }
 
-    return null;
+    return IncentivosMapper.toDto(misionesRepo.findById(mid)
+        .orElseThrow(() -> new NoSuchElementException("Mision inexistente")));
   }
 
   @Override
@@ -210,11 +205,11 @@ public class Fachada implements FachadaIncentivos {
       throw new RuntimeException(e);
     }
 
-    if (misionDTO.id() == null || !misiones.containsKey(misionDTO.id())) {
+    if (misionDTO.id() == null || !misionesRepo.existsById(misionDTO.id())) {
       throw new RuntimeException("Mision inexistente");
     }
 
-    misionPorDonador.put(donadorID, misionDTO.id());
+    asignacionesRepo.setMision(donadorID, misionDTO.id());
   }
 
   @Override
@@ -234,14 +229,11 @@ public class Fachada implements FachadaIncentivos {
       throw new RuntimeException(e);
     }
 
-    if (insigniaDTO.id() == null || !insignias.containsKey(insigniaDTO.id())) {
+    if (insigniaDTO.id() == null || !insigniasRepo.existsById(insigniaDTO.id())) {
       throw new RuntimeException("Insignia inexistente");
     }
 
-    var lista = insigniasPorDonador.computeIfAbsent(donadorID, k -> new ArrayList<>());
-    // evitar duplicados por id
-    boolean exists = lista.stream().anyMatch(i -> i.equals(insigniaDTO.id()));
-    if (!exists) lista.add(insigniaDTO.id());
+    asignacionesRepo.setInsignia(donadorID, insigniaDTO.id());
   }
 
   // registrar cambio de categoria y mantener historial
@@ -251,11 +243,7 @@ public class Fachada implements FachadaIncentivos {
       if (don == null) {
         throw new RuntimeException("Donador inexistente");
       }
-      var antigua = don.categoria();
-      if (antigua != null) {
-        var hist = categoriasPorDonador.computeIfAbsent(donadorID, k -> new ArrayList<>());
-        hist.add(antigua);
-      }
+        asignacionesRepo.agregarCategoriaAnterior(donadorID, don.categoria());
       // actualizar en la fachada de donadores
       fachadaDonadoresYEntidades.modifcarCategoria(donadorID, nuevaCategoria);
     } catch (RuntimeException e) {
@@ -264,8 +252,13 @@ public class Fachada implements FachadaIncentivos {
   }
 
   public List<String> historialCategorias(String donadorID) {
-    return categoriasPorDonador.getOrDefault(donadorID, List.of());
+    return asignacionesRepo.historialCategorias(donadorID);
   }
+
+  // Compatibilidad mínima para el resto del proyecto; no se usa en los tests de incentivos.
+  public DonadorDTO agregarDonador(DonadorDTO donadorDTO) { throw new UnsupportedOperationException(); }
+  public DonadorDTO buscarDonadorPorID(String donadorID) { throw new UnsupportedOperationException(); }
+  public NecesidadMaterialDTO agregarNecesidadMaterial(NecesidadMaterialDTO necesidadMaterialDTO) { throw new UnsupportedOperationException(); }
 
   @Override
   public void procesarDonador(String donadorID) throws NoSuchElementException {
@@ -287,49 +280,24 @@ public class Fachada implements FachadaIncentivos {
       donaciones = List.of();
     }
 
-    // contadores
-    long exitosas = donaciones.stream()
-        .filter(d -> d.estado() == EstadoDonacionEnum.ACEPTADA)
-        .count();
-
-    long distintasEntidades = donaciones.stream()
-        .filter(d -> d.estado() == EstadoDonacionEnum.ACEPTADA)
-        .map(DonacionDTO::depositoID)
-        .filter(java.util.Objects::nonNull)
-        .distinct()
-        .count();
-
     // Evaluar mision asignada
-    var misionActualId = misionPorDonador.get(donadorID);
+    var misionActualId = asignacionesRepo.getMision(donadorID);
     if (misionActualId == null) {
       return; // nada asignado
     }
-    var misionActual = misiones.get(misionActualId);
+    var misionActual = misionesRepo.findById(misionActualId).orElse(null);
     if (misionActual == null) return;
 
-    boolean completada = false;
-    String nombreMision = misionActual.getNombre();
-
-    if ("Completitud".equalsIgnoreCase(nombreMision) || "completitud".equalsIgnoreCase(nombreMision)) {
-      if (distintasEntidades >= 3) {
-        completada = true;
-      }
-    } else if ("Donaciones Exitosas".equalsIgnoreCase(nombreMision) || "donaciones exitosas".equalsIgnoreCase(nombreMision)) {
-      if (exitosas >= 20) {
-        completada = true;
-      }
-    } else {
-      // ampliar a mas criterios
-      if (exitosas >= 20) {
-        completada = true;
-      }
-    }
+    boolean completada = evaluarMision(misionActual, donaciones);
 
     if (completada) {
       String insigniaID = misionActual.getInsigniaID();
-      if (insigniaID != null && insignias.containsKey(insigniaID)) {
+      if (insigniaID != null && insigniasRepo.existsById(insigniaID)) {
         try {
-          asignarInsigniaADonador(donadorID, IncentivosMapper.toDto(insignias.get(insigniaID)));
+          asignarInsigniaADonador(
+              donadorID,
+              IncentivosMapper.toDto(
+                  insigniasRepo.findById(insigniaID).orElseThrow(() -> new NoSuchElementException("Insignia inexistente"))));
         } catch (RuntimeException e) {
           // manejo el error pero no hago nada
         }
@@ -355,18 +323,131 @@ public class Fachada implements FachadaIncentivos {
       }
 
       // Remover mision actual
-      misionPorDonador.remove(donadorID);
+      asignacionesRepo.removeMision(donadorID);
 
       if (nuevaCategoria != null) {
         // encontrar proxima mision
         final String categoriaBuscada = nuevaCategoria;
         Optional<Mision> siguiente =
-            misiones.values().stream()
+            misionesRepo.findAll().stream()
+                .filter(m -> m.getId() == null || !m.getId().equals(misionActual.getId()))
                 .filter(m -> m.getCategoriaInicio() != null && m.getCategoriaInicio().equals(categoriaBuscada))
                 .findFirst();
-        siguiente.ifPresent(misionDTO -> misionPorDonador.put(donadorID, misionDTO.getId()));
+        siguiente.ifPresent(misionDTO -> asignacionesRepo.setMision(donadorID, misionDTO.getId()));
       }
     }
+  }
+
+  private boolean evaluarMision(Mision misionActual, List<DonacionDTO> donaciones) {
+    var donacionesAceptadas =
+        donaciones.stream()
+            .filter(d -> d != null && d.estado() == EstadoDonacionEnum.ACEPTADA)
+            .collect(Collectors.toList());
+
+    TipoMisionEnum tipoMision = misionActual.getTipo();
+    if (tipoMision == null) {
+      tipoMision = inferirTipoPorNombre(misionActual.getNombre());
+    }
+
+    if (tipoMision == null) {
+      return contarDonacionesExitosas(donacionesAceptadas) >= 20;
+    }
+
+    return switch (tipoMision) {
+      case COMPLETITUD -> evaluarCompletitud(donacionesAceptadas);
+      case DONACIONES_EXITOSAS -> contarDonacionesExitosas(donacionesAceptadas) >= 20;
+      case DONACIONES_ASCENDENTES -> evaluarDonacionesAscendentes(donacionesAceptadas);
+      case REVOLUCION_DONADORA -> contarDonacionesGrandes(donacionesAceptadas) > 10;
+    };
+  }
+
+  private TipoMisionEnum inferirTipoPorNombre(String nombreMision) {
+    if (nombreMision == null) {
+      return null;
+    }
+
+    String normalizado = nombreMision.trim().toLowerCase();
+    return switch (normalizado) {
+      case "completitud" -> TipoMisionEnum.COMPLETITUD;
+      case "donaciones exitosas" -> TipoMisionEnum.DONACIONES_EXITOSAS;
+      case "donaciones ascendentes" -> TipoMisionEnum.DONACIONES_ASCENDENTES;
+      case "revolucion donadora", "revolución donadora" -> TipoMisionEnum.REVOLUCION_DONADORA;
+      default -> null;
+    };
+  }
+
+  private boolean evaluarCompletitud(List<DonacionDTO> donacionesAceptadas) {
+    Set<String> categorias = new HashSet<>();
+    boolean pudoResolverCategoria = false;
+
+    if (fachadaDonaciones != null) {
+      for (var donacion : donacionesAceptadas) {
+        String categoria = obtenerCategoriaProducto(donacion);
+        if (categoria != null) {
+          pudoResolverCategoria = true;
+          categorias.add(categoria);
+        }
+      }
+    }
+
+    if (pudoResolverCategoria) {
+      return categorias.size() >= 3;
+    }
+
+    long depositosDistintos =
+        donacionesAceptadas.stream()
+            .map(DonacionDTO::depositoID)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .count();
+    return depositosDistintos >= 3;
+  }
+
+  private String obtenerCategoriaProducto(DonacionDTO donacion) {
+    if (donacion == null || donacion.productoID() == null) {
+      return null;
+    }
+
+    try {
+      ProductoDTO producto = fachadaDonaciones.buscarProductoPorID(donacion.productoID());
+      if (producto == null) {
+        return null;
+      }
+      return producto.categoriaID();
+    } catch (RuntimeException ex) {
+      return null;
+    }
+  }
+
+  private long contarDonacionesExitosas(List<DonacionDTO> donacionesAceptadas) {
+    return donacionesAceptadas.size();
+  }
+
+  private boolean evaluarDonacionesAscendentes(List<DonacionDTO> donacionesAceptadas) {
+    if (donacionesAceptadas.size() < 5) {
+      return false;
+    }
+
+    List<DonacionDTO> ultimasCinco =
+        donacionesAceptadas.subList(donacionesAceptadas.size() - 5, donacionesAceptadas.size());
+
+    Integer anterior = null;
+    for (DonacionDTO donacion : ultimasCinco) {
+      if (donacion == null || donacion.cantidad() == null) {
+        return false;
+      }
+      if (anterior != null && donacion.cantidad() <= anterior) {
+        return false;
+      }
+      anterior = donacion.cantidad();
+    }
+    return true;
+  }
+
+  private long contarDonacionesGrandes(List<DonacionDTO> donacionesAceptadas) {
+    return donacionesAceptadas.stream()
+        .filter(d -> d.cantidad() != null && d.cantidad() > 50)
+        .count();
   }
 
   // todo eventualmente esto se va, lo dejo momentaneamente para inyectar los mocks

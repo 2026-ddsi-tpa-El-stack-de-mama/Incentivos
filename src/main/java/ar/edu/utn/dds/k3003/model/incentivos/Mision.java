@@ -1,20 +1,28 @@
 package ar.edu.utn.dds.k3003.model.incentivos;
 
+import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.TipoMisionEnum;
+
 public class Mision {
   private String id;
   private String nombre;
   private String insigniaID;
   private String categoriaInicio;
   private String categoriaFin;
+  private TipoMisionEnum tipo;
 
   public Mision() {}
 
   public Mision(String id, String nombre, String insigniaID, String categoriaInicio, String categoriaFin) {
+    this(id, nombre, insigniaID, categoriaInicio, categoriaFin, null);
+  }
+
+  public Mision(String id, String nombre, String insigniaID, String categoriaInicio, String categoriaFin, TipoMisionEnum tipo) {
     this.id = id;
     this.nombre = nombre;
     this.insigniaID = insigniaID;
     this.categoriaInicio = categoriaInicio;
     this.categoriaFin = categoriaFin;
+    this.tipo = tipo;
   }
 
   public String getId() {
@@ -55,6 +63,14 @@ public class Mision {
 
   public void setCategoriaFin(String categoriaFin) {
     this.categoriaFin = categoriaFin;
+  }
+
+  public TipoMisionEnum getTipo() {
+    return tipo;
+  }
+
+  public void setTipo(TipoMisionEnum tipo) {
+    this.tipo = tipo;
   }
 
 }

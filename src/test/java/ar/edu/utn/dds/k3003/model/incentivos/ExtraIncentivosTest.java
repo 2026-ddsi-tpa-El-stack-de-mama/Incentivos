@@ -12,6 +12,7 @@ import ar.edu.utn.dds.k3003.catedra.dtos.donadoresYEntidades.EstadoDonadorEnum;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.CategoriaDonadorEnum;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.InsigniaDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.MisionDTO;
+import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.TipoMisionEnum;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonaciones;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonadoresYEntidades;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaIncentivos;
@@ -74,7 +75,7 @@ public class ExtraIncentivosTest {
 
     InsigniaDTO i = instancia.agregarInsignia(insigniaEjemplo);
     // crear la mision usando el id real de la insignia
-    MisionDTO m = new MisionDTO(null, "Donaciones Exitosas", i.id(), CategoriaDonadorEnum.COLABORADOR, CategoriaDonadorEnum.TRANSFORMADOR);
+    MisionDTO m = new MisionDTO(null, "Donaciones Exitosas", i.id(), CategoriaDonadorEnum.COLABORADOR, CategoriaDonadorEnum.TRANSFORMADOR, TipoMisionEnum.DONACIONES_EXITOSAS);
     m = instancia.agregarMision(m);
     instancia.asignarMisionADonador(id, m);
 
@@ -108,8 +109,8 @@ public class ExtraIncentivosTest {
 
     InsigniaDTO i = instancia.agregarInsignia(insigniaEjemplo);
      // crear misiones con la id real de la insignia
-    MisionDTO mA = new MisionDTO(null, "Completitud", i.id(), CategoriaDonadorEnum.OCASIONAL, CategoriaDonadorEnum.COLABORADOR);
-    MisionDTO mB = new MisionDTO(null, "misionSiguiente", i.id(), CategoriaDonadorEnum.COLABORADOR, null);
+    MisionDTO mA = new MisionDTO(null, "Completitud", i.id(), CategoriaDonadorEnum.OCASIONAL, CategoriaDonadorEnum.COLABORADOR, TipoMisionEnum.COMPLETITUD);
+    MisionDTO mB = new MisionDTO(null, "misionSiguiente", i.id(), CategoriaDonadorEnum.COLABORADOR, null, null);
     mA = instancia.agregarMision(mA);
     mB = instancia.agregarMision(mB);
     instancia.asignarMisionADonador(id, mA);
@@ -173,5 +174,192 @@ public class ExtraIncentivosTest {
     MisionDTO res = instancia.getMisionEnCursoDeDonador(id);
     Assertions.assertNull(res);
   }
+
+  @Test
+  void procesarDonador_otorgaInsignia_paraDonacionesAscendentes() {
+    String id = donadorEjemplo.id();
+    when(fachadaDonadoresYEntidades.buscarDonadorPorID(id)).thenReturn(donadorEjemplo);
+
+    InsigniaDTO i = instancia.agregarInsignia(insigniaEjemplo);
+    MisionDTO m = new MisionDTO(null, "Donaciones Ascendentes", i.id(), CategoriaDonadorEnum.OCASIONAL, CategoriaDonadorEnum.COLABORADOR, TipoMisionEnum.DONACIONES_ASCENDENTES);
+    m = instancia.agregarMision(m);
+    instancia.asignarMisionADonador(id, m);
+
+    // crear 5 donaciones aceptadas con cantidades ascendentes
+    List<DonacionDTO> donaciones = List.of(
+        new DonacionDTO("d1", id, "dep1", "desc", "prod", 10, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d2", id, "dep1", "desc", "prod", 20, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d3", id, "dep1", "desc", "prod", 30, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d4", id, "dep1", "desc", "prod", 40, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d5", id, "dep1", "desc", "prod", 50, EstadoDonacionEnum.ACEPTADA)
+    );
+
+    when(fachadaDonaciones.buscarPorDonadorYFechaInicio(eq(id), any())).thenReturn(donaciones);
+
+    instancia.procesarDonador(id);
+
+    List<InsigniaDTO> resultado = instancia.getInsigniasDeDonador(id);
+    Assertions.assertNotNull(resultado);
+    Assertions.assertTrue(resultado.stream().anyMatch(x -> x.id().equals(i.id())));
+
+    // mision debe haberse removido
+    Assertions.assertNull(instancia.getMisionEnCursoDeDonador(id));
+  }
+
+  @Test
+  void procesarDonador_noCumpleDonacionesAscendentes_siMenosDe5() {
+    String id = donadorEjemplo.id();
+    when(fachadaDonadoresYEntidades.buscarDonadorPorID(id)).thenReturn(donadorEjemplo);
+
+    InsigniaDTO i = instancia.agregarInsignia(insigniaEjemplo);
+    MisionDTO m = new MisionDTO(null, "Donaciones Ascendentes", i.id(), CategoriaDonadorEnum.OCASIONAL, CategoriaDonadorEnum.COLABORADOR, TipoMisionEnum.DONACIONES_ASCENDENTES);
+    m = instancia.agregarMision(m);
+    instancia.asignarMisionADonador(id, m);
+
+    // crear solo 3 donaciones aceptadas (menos de 5)
+    List<DonacionDTO> donaciones = List.of(
+        new DonacionDTO("d1", id, "dep1", "desc", "prod", 10, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d2", id, "dep1", "desc", "prod", 20, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d3", id, "dep1", "desc", "prod", 30, EstadoDonacionEnum.ACEPTADA)
+    );
+
+    when(fachadaDonaciones.buscarPorDonadorYFechaInicio(eq(id), any())).thenReturn(donaciones);
+
+    instancia.procesarDonador(id);
+
+    // mision debe seguir asignada
+    MisionDTO actual = instancia.getMisionEnCursoDeDonador(id);
+    Assertions.assertNotNull(actual);
+    Assertions.assertEquals(m.id(), actual.id());
+
+    // insignia no debe haberse otorgado
+    List<InsigniaDTO> insignias = instancia.getInsigniasDeDonador(id);
+    Assertions.assertTrue(insignias.isEmpty());
+  }
+
+  @Test
+  void procesarDonador_noCumpleDonacionesAscendentes_siNoEsAscendente() {
+    String id = donadorEjemplo.id();
+    when(fachadaDonadoresYEntidades.buscarDonadorPorID(id)).thenReturn(donadorEjemplo);
+
+    InsigniaDTO i = instancia.agregarInsignia(insigniaEjemplo);
+    MisionDTO m = new MisionDTO(null, "Donaciones Ascendentes", i.id(), CategoriaDonadorEnum.OCASIONAL, CategoriaDonadorEnum.COLABORADOR, TipoMisionEnum.DONACIONES_ASCENDENTES);
+    m = instancia.agregarMision(m);
+    instancia.asignarMisionADonador(id, m);
+
+    // crear 5 donaciones pero NO ascendentes (plateau en medio)
+    List<DonacionDTO> donaciones = List.of(
+        new DonacionDTO("d1", id, "dep1", "desc", "prod", 10, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d2", id, "dep1", "desc", "prod", 30, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d3", id, "dep1", "desc", "prod", 30, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d4", id, "dep1", "desc", "prod", 40, EstadoDonacionEnum.ACEPTADA),
+        new DonacionDTO("d5", id, "dep1", "desc", "prod", 50, EstadoDonacionEnum.ACEPTADA)
+    );
+
+    when(fachadaDonaciones.buscarPorDonadorYFechaInicio(eq(id), any())).thenReturn(donaciones);
+
+    instancia.procesarDonador(id);
+
+    // mision debe seguir asignada
+    MisionDTO actual = instancia.getMisionEnCursoDeDonador(id);
+    Assertions.assertNotNull(actual);
+    Assertions.assertEquals(m.id(), actual.id());
+
+    // insignia no debe haberse otorgado
+    List<InsigniaDTO> insignias = instancia.getInsigniasDeDonador(id);
+    Assertions.assertTrue(insignias.isEmpty());
+  }
+
+  @Test
+  void procesarDonador_otorgaInsignia_paraRevolucionDonadora() {
+    String id = donadorEjemplo.id();
+    when(fachadaDonadoresYEntidades.buscarDonadorPorID(id)).thenReturn(donadorEjemplo);
+
+    InsigniaDTO i = instancia.agregarInsignia(insigniaEjemplo);
+    MisionDTO m = new MisionDTO(null, "Revolución Donadora", i.id(), CategoriaDonadorEnum.OCASIONAL, CategoriaDonadorEnum.TRANSFORMADOR, TipoMisionEnum.REVOLUCION_DONADORA);
+    m = instancia.agregarMision(m);
+    instancia.asignarMisionADonador(id, m);
+
+    // crear 15 donaciones aceptadas con cantidad > 50
+    List<DonacionDTO> donaciones = new ArrayList<>();
+    for (int k = 0; k < 15; k++) {
+      donaciones.add(new DonacionDTO("d" + k, id, "dep1", "desc", "prod", 60, EstadoDonacionEnum.ACEPTADA));
+    }
+
+    when(fachadaDonaciones.buscarPorDonadorYFechaInicio(eq(id), any())).thenReturn(donaciones);
+
+    instancia.procesarDonador(id);
+
+    List<InsigniaDTO> resultado = instancia.getInsigniasDeDonador(id);
+    Assertions.assertNotNull(resultado);
+    Assertions.assertTrue(resultado.stream().anyMatch(x -> x.id().equals(i.id())));
+
+    // mision debe haberse removido
+    Assertions.assertNull(instancia.getMisionEnCursoDeDonador(id));
+  }
+
+  @Test
+  void procesarDonador_noCumpleRevolucionDonadora_siMenosDe10() {
+    String id = donadorEjemplo.id();
+    when(fachadaDonadoresYEntidades.buscarDonadorPorID(id)).thenReturn(donadorEjemplo);
+
+    InsigniaDTO i = instancia.agregarInsignia(insigniaEjemplo);
+    MisionDTO m = new MisionDTO(null, "Revolución Donadora", i.id(), CategoriaDonadorEnum.OCASIONAL, CategoriaDonadorEnum.TRANSFORMADOR, TipoMisionEnum.REVOLUCION_DONADORA);
+    m = instancia.agregarMision(m);
+    instancia.asignarMisionADonador(id, m);
+
+    // crear solo 8 donaciones con cantidad > 50 (menos de 10)
+    List<DonacionDTO> donaciones = new ArrayList<>();
+    for (int k = 0; k < 8; k++) {
+      donaciones.add(new DonacionDTO("d" + k, id, "dep1", "desc", "prod", 60, EstadoDonacionEnum.ACEPTADA));
+    }
+
+    when(fachadaDonaciones.buscarPorDonadorYFechaInicio(eq(id), any())).thenReturn(donaciones);
+
+    instancia.procesarDonador(id);
+
+    // mision debe seguir asignada
+    MisionDTO actual = instancia.getMisionEnCursoDeDonador(id);
+    Assertions.assertNotNull(actual);
+    Assertions.assertEquals(m.id(), actual.id());
+
+    // insignia no debe haberse otorgado
+    List<InsigniaDTO> insignias = instancia.getInsigniasDeDonador(id);
+    Assertions.assertTrue(insignias.isEmpty());
+  }
+
+  @Test
+  void procesarDonador_noCumpleRevolucionDonadora_siCantidadesMenores() {
+    String id = donadorEjemplo.id();
+    when(fachadaDonadoresYEntidades.buscarDonadorPorID(id)).thenReturn(donadorEjemplo);
+
+    InsigniaDTO i = instancia.agregarInsignia(insigniaEjemplo);
+    MisionDTO m = new MisionDTO(null, "Revolución Donadora", i.id(), CategoriaDonadorEnum.OCASIONAL, CategoriaDonadorEnum.TRANSFORMADOR, TipoMisionEnum.REVOLUCION_DONADORA);
+    m = instancia.agregarMision(m);
+    instancia.asignarMisionADonador(id, m);
+
+    // crear 15 donaciones pero solo 5 con cantidad > 50
+    List<DonacionDTO> donaciones = new ArrayList<>();
+    for (int k = 0; k < 5; k++) {
+      donaciones.add(new DonacionDTO("d" + k, id, "dep1", "desc", "prod", 60, EstadoDonacionEnum.ACEPTADA));
+    }
+    for (int k = 5; k < 15; k++) {
+      donaciones.add(new DonacionDTO("d" + k, id, "dep1", "desc", "prod", 30, EstadoDonacionEnum.ACEPTADA));
+    }
+
+    when(fachadaDonaciones.buscarPorDonadorYFechaInicio(eq(id), any())).thenReturn(donaciones);
+
+    instancia.procesarDonador(id);
+
+    // mision debe seguir asignada
+    MisionDTO actual = instancia.getMisionEnCursoDeDonador(id);
+    Assertions.assertNotNull(actual);
+    Assertions.assertEquals(m.id(), actual.id());
+
+    // insignia no debe haberse otorgado
+    List<InsigniaDTO> insignias = instancia.getInsigniasDeDonador(id);
+    Assertions.assertTrue(insignias.isEmpty());
+  }
+
 }
 

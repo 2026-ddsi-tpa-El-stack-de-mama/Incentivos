@@ -22,7 +22,7 @@ public final class IncentivosMapper {
     if (dto == null) return null;
     String categoriaInicio = dto.categoriaInicio() != null ? dto.categoriaInicio().name() : null;
     String categoriaFin = dto.categoriaFin() != null ? dto.categoriaFin().name() : null;
-    return new Mision(dto.id(), dto.nombre(), dto.insigniaID(), categoriaInicio, categoriaFin);
+    return new Mision(dto.id(), dto.nombre(), dto.insigniaID(), categoriaInicio, categoriaFin, dto.tipo());
   }
 
   public static MisionDTO toDto(Mision entity) {
@@ -40,7 +40,7 @@ public final class IncentivosMapper {
       }
     } catch (IllegalArgumentException ignored) {}
 
-    return new MisionDTO(entity.getId(), entity.getNombre(), entity.getInsigniaID(), categoriaInicio, categoriaFin);
+    return new MisionDTO(entity.getId(), entity.getNombre(), entity.getInsigniaID(), categoriaInicio, categoriaFin, entity.getTipo());
   }
 }
 
