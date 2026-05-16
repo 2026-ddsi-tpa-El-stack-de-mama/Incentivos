@@ -2,13 +2,13 @@
 # 🧪 2026 - Trabajo Práctico Anual
 
 ## 👤 Datos del Alumno
-- **Nombre:** Luca Gonzalo
-- **Apellido:** Trias Lupinacci
+- **Nombre:** César Tomás 
+- **Apellido:** González Grünwaldt
 
 ---
 
 🧩 Componente Desarrollado
-- Logistica
+- Incentivos
 
 ---
 

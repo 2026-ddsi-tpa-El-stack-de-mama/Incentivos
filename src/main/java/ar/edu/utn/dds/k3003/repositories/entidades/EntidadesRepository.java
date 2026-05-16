@@ -1,14 +1,14 @@
 package ar.edu.utn.dds.k3003.repositories.entidades;
 
-import ar.edu.utn.dds.k3003.model.Entidad;
+import ar.edu.utn.dds.k3003.catedra.dtos.donadoresYEntidades.EntidadBeneficaDTO;
 
 import java.util.Optional;
 
 public interface EntidadesRepository {
 
-    Optional<Entidad> findById(String id);
+    Optional<EntidadBeneficaDTO> findById(String id);
 
-    Entidad save(Entidad entidad);
+    EntidadBeneficaDTO save(EntidadBeneficaDTO entidad);
 
-    Entidad deleteById(String id);
+    EntidadBeneficaDTO deleteById(String id);
 }
