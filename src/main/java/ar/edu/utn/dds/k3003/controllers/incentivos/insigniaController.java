@@ -5,12 +5,17 @@ import ar.edu.utn.dds.k3003.Fachada;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.InsigniaDTO;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -24,58 +29,120 @@ public class insigniaController {
 		this.fachada = fachada;
 	}
 
-	@PostMapping
-	public ResponseEntity<?> postInsignia(@RequestBody InsigniaDTO insigniaDTO) {
-		if (insigniaDTO == null) {
-			return ResponseEntity.badRequest().body("Insignia nula");
-		}
+    private static final Logger logger = LoggerFactory.getLogger(insigniaController.class);
 
-		try {
-			return ResponseEntity.status(HttpStatus.CREATED).body(fachada.agregarInsignia(insigniaDTO));
-		} catch (RuntimeException ex) {
-			return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
-		}
+		  @PostMapping
+		  public ResponseEntity<?> postInsignia(@RequestBody InsigniaDTO insigniaDTO) {
+                String requestId = MDC.get("request_id");
+                logger.info("[{}] POST /insignias - crear insignia: {}", requestId, insigniaDTO);
+
+				if (insigniaDTO == null) {
+					return ResponseEntity.badRequest().header("X-Request-Id", requestId).body("Insignia nula");
+				}
+
+				try {
+					return ResponseEntity.status(HttpStatus.CREATED)
+							.header("X-Request-Id", requestId)
+							.body(fachada.agregarInsignia(insigniaDTO));
+				} catch (RuntimeException ex) {
+					logger.warn("[{}] POST /insignias - error: {}", requestId, ex.getMessage());
+					return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
+				}
+			}
+
+	@PutMapping("/{id}")
+	public ResponseEntity<?> putInsignia(
+			@PathVariable("id") String insigniaID,
+			@RequestBody InsigniaDTO insigniaDTO) {
+        String requestId = MDC.get("request_id");
+        logger.info("[{}] PUT /insignias/{} - modificar insignia: {}", requestId, insigniaID, insigniaDTO);
+
+        if (insigniaDTO == null) {
+            return ResponseEntity.badRequest().header("X-Request-Id", requestId).body("Insignia nula");
+        }
+        if (insigniaDTO.id() != null && !insigniaID.equals(insigniaDTO.id())) {
+            return ResponseEntity.badRequest().header("X-Request-Id", requestId).body("Id de insignia inconsistente");
+        }
+
+        try {
+            return ResponseEntity.ok().header("X-Request-Id", requestId).body(
+                    fachada.modificarInsignia(
+                            new InsigniaDTO(insigniaID, insigniaDTO.nombre(), insigniaDTO.descripcion())));
+        } catch (NoSuchElementException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
+        } catch (RuntimeException ex) {
+            if (ex.getMessage() != null && ex.getMessage().toLowerCase().contains("inexistente")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
+            }
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
+        }
+	}
+
+	@DeleteMapping("/{id}")
+	public ResponseEntity<?> deleteInsignia(@PathVariable("id") String insigniaID) {
+        String requestId = MDC.get("request_id");
+        logger.info("[{}] DELETE /insignias/{} - eliminar insignia", requestId, insigniaID);
+        try {
+            fachada.eliminarInsignia(insigniaID);
+            return ResponseEntity.ok().header("X-Request-Id", requestId).body("Insignia eliminada exitosamente");
+        } catch (NoSuchElementException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
+        } catch (RuntimeException ex) {
+            if (ex.getMessage() != null && ex.getMessage().toLowerCase().contains("inexistente")) {
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
+            }
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
+        }
 	}
 
 	@GetMapping
 	public ResponseEntity<List<InsigniaDTO>> getInsignias() {
-		return ResponseEntity.ok(fachada.listarInsignias());
+        String requestId = MDC.get("request_id");
+        logger.info("[{}] GET /insignias - listar insignias", requestId);
+        var lista = fachada.listarInsignias();
+        return ResponseEntity.ok().header("X-Request-Id", requestId).body(lista);
 	}
 
 	@GetMapping("/{id}")
 	public ResponseEntity<?> getInsigniaById(@PathVariable("id") String insigniaID) {
-		try {
-			return ResponseEntity.ok(fachada.buscarInsigniaPorID(insigniaID));
-		} catch (NoSuchElementException ex) {
-			return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
-		}
+        String requestId = MDC.get("request_id");
+        logger.info("[{}] GET /insignias/{} - buscar insignia por id", requestId, insigniaID);
+        try {
+            return ResponseEntity.ok().header("X-Request-Id", requestId).body(fachada.buscarInsigniaPorID(insigniaID));
+        } catch (NoSuchElementException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
+        }
 	}
 
 	@PostMapping("/{insigniaID}/donadores/{donadorID}")
 	public ResponseEntity<?> asignarInsigniaADonador(
 			@PathVariable("insigniaID") String insigniaID,
 			@PathVariable("donadorID") String donadorID) {
-		try {
-			InsigniaDTO insigniaDTO = fachada.buscarInsigniaPorID(insigniaID);
-			fachada.asignarInsigniaADonador(donadorID, insigniaDTO);
-			return ResponseEntity.status(HttpStatus.OK).body("Insignia asignada exitosamente");
-		} catch (NoSuchElementException ex) {
-			return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
-		} catch (RuntimeException ex) {
-			return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ex.getMessage());
-		}
+        String requestId = MDC.get("request_id");
+        logger.info("[{}] POST /insignias/{}/donadores/{} - asignar insignia a donador", requestId, insigniaID, donadorID);
+        try {
+            InsigniaDTO insigniaDTO = fachada.buscarInsigniaPorID(insigniaID);
+            fachada.asignarInsigniaADonador(donadorID, insigniaDTO);
+            return ResponseEntity.status(HttpStatus.OK).header("X-Request-Id", requestId).body("Insignia asignada exitosamente");
+        } catch (NoSuchElementException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
+        } catch (RuntimeException ex) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
+        }
 	}
 
 	@GetMapping("/donadores/{donadorID}")
 	public ResponseEntity<?> getInsigniasDeDonador(@PathVariable("donadorID") String donadorID) {
-		try {
-			List<InsigniaDTO> insignias = fachada.getInsigniasDeDonador(donadorID);
-			return ResponseEntity.ok(insignias);
-		} catch (NoSuchElementException ex) {
-			return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ex.getMessage());
-		} catch (Exception ex) {
-			return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ex.getMessage());
-		}
+        String requestId = MDC.get("request_id");
+        logger.info("[{}] GET /insignias/donadores/{} - obtener insignias de donador", requestId, donadorID);
+        try {
+            List<InsigniaDTO> insignias = fachada.getInsigniasDeDonador(donadorID);
+            return ResponseEntity.ok().header("X-Request-Id", requestId).body(insignias);
+        } catch (NoSuchElementException ex) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
+        } catch (Exception ex) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).header("X-Request-Id", requestId).body(ex.getMessage());
+        }
 	}
 
 }

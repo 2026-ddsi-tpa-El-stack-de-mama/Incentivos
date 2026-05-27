@@ -16,6 +16,9 @@ import ar.edu.utn.dds.k3003.repositories.incentivos.InMemoryMisionesRepo;
 import ar.edu.utn.dds.k3003.model.incentivos.Insignia;
 import ar.edu.utn.dds.k3003.model.incentivos.Mision;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -36,6 +39,8 @@ public class Fachada implements FachadaIncentivos {
   private FachadaDonadoresYEntidades fachadaDonadoresYEntidades;
   private FachadaDonaciones fachadaDonaciones;
 
+  private static final Logger logger = LoggerFactory.getLogger(Fachada.class);
+
 
   public Fachada() {
     /*
@@ -53,6 +58,8 @@ public class Fachada implements FachadaIncentivos {
   // ar.edu.utn.dds.k3003.catedra.dtos.incentivos.InsigniaDTO
   @Override
   public InsigniaDTO agregarInsignia(InsigniaDTO insignia) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.agregarInsignia - entrada: {}", requestId, insignia);
     if (insignia == null) {
       throw new RuntimeException("Insignia nula");
     }
@@ -62,10 +69,14 @@ public class Fachada implements FachadaIncentivos {
     }
 
     var ent = IncentivosMapper.toEntity(insignia);
-    return IncentivosMapper.toDto(insigniasRepo.save(ent));
+    var dto = IncentivosMapper.toDto(insigniasRepo.save(ent));
+    logger.info("[{}] Fachada.agregarInsignia - salida: id={}", requestId, dto.id());
+    return dto;
   }
 
   public InsigniaDTO modificarInsignia(InsigniaDTO insignia) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.modificarInsignia - entrada: {}", requestId, insignia);
     if (insignia == null) {
       throw new RuntimeException("Insignia nula");
     }
@@ -73,20 +84,27 @@ public class Fachada implements FachadaIncentivos {
       throw new RuntimeException("Insignia inexistente");
     }
     var ent = IncentivosMapper.toEntity(insignia);
-    return IncentivosMapper.toDto(insigniasRepo.save(ent));
+    var dto = IncentivosMapper.toDto(insigniasRepo.save(ent));
+    logger.info("[{}] Fachada.modificarInsignia - salida: id={}", requestId, dto.id());
+    return dto;
   }
 
   public void eliminarInsignia(String insigniaID) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.eliminarInsignia - entrada: id={}", requestId, insigniaID);
     if (insigniaID == null || !insigniasRepo.existsById(insigniaID)) {
       throw new RuntimeException("Insignia inexistente");
     }
     insigniasRepo.deleteById(insigniaID);
     asignacionesRepo.removeInsignia(insigniaID);
+    logger.info("[{}] Fachada.eliminarInsignia - salida: id={}", requestId, insigniaID);
   }
 
   @Override
   public MisionDTO agregarMision(
       MisionDTO mision) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.agregarMision - entrada: {}", requestId, mision);
     if (mision == null) {
       throw new RuntimeException("Mision nula");
     }
@@ -98,10 +116,14 @@ public class Fachada implements FachadaIncentivos {
     var ent = IncentivosMapper.toEntity(mision);
     // todo validar que la insignia referenciada exista (elimine la validacion pq sino no pasan los tests de catedra)
 
-    return IncentivosMapper.toDto(misionesRepo.save(ent));
+    var dto = IncentivosMapper.toDto(misionesRepo.save(ent));
+    logger.info("[{}] Fachada.agregarMision - salida: id={}", requestId, dto.id());
+    return dto;
   }
 
   public MisionDTO modificarMision(MisionDTO mision) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.modificarMision - entrada: {}", requestId, mision);
     if (mision == null || mision.id() == null) {
       throw new RuntimeException("Mision nula o sin id");
     }
@@ -109,40 +131,57 @@ public class Fachada implements FachadaIncentivos {
       throw new RuntimeException("Mision inexistente");
     }
     var ent = IncentivosMapper.toEntity(mision);
-    return IncentivosMapper.toDto(misionesRepo.save(ent));
+    var dto = IncentivosMapper.toDto(misionesRepo.save(ent));
+    logger.info("[{}] Fachada.modificarMision - salida: id={}", requestId, dto.id());
+    return dto;
   }
 
   public void eliminarMision(String misionID) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.eliminarMision - entrada: id={}", requestId, misionID);
     if (misionID == null || !misionesRepo.existsById(misionID)) {
       throw new RuntimeException("Mision inexistente");
     }
     misionesRepo.deleteById(misionID);
     asignacionesRepo.removeMisionById(misionID);
+    logger.info("[{}] Fachada.eliminarMision - salida: id={}", requestId, misionID);
   }
 
   // listado para consultar existentes
   public List<InsigniaDTO> listarInsignias() {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.listarInsignias", requestId);
     return insigniasRepo.findAll().stream().map(IncentivosMapper::toDto).collect(Collectors.toList());
   }
 
   public InsigniaDTO buscarInsigniaPorID(String insigniaID) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.buscarInsigniaPorID - id={}", requestId, insigniaID);
     if (insigniaID == null) {
       throw new NoSuchElementException("Insignia inexistente");
     }
-    return IncentivosMapper.toDto(insigniasRepo.findById(insigniaID)
+    var dto = IncentivosMapper.toDto(insigniasRepo.findById(insigniaID)
         .orElseThrow(() -> new NoSuchElementException("Insignia inexistente")));
+    logger.info("[{}] Fachada.buscarInsigniaPorID - salida id={}", requestId, dto.id());
+    return dto;
   }
 
   public List<MisionDTO> listarMisiones() {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.listarMisiones", requestId);
     return misionesRepo.findAll().stream().map(IncentivosMapper::toDto).collect(Collectors.toList());
   }
 
   public MisionDTO buscarMisionPorID(String misionID) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.buscarMisionPorID - id={}", requestId, misionID);
     if (misionID == null) {
       throw new NoSuchElementException("Mision inexistente");
     }
-    return IncentivosMapper.toDto(misionesRepo.findById(misionID)
+    var dto = IncentivosMapper.toDto(misionesRepo.findById(misionID)
         .orElseThrow(() -> new NoSuchElementException("Mision inexistente")));
+    logger.info("[{}] Fachada.buscarMisionPorID - salida id={}", requestId, dto.id());
+    return dto;
   }
 
   @Override
@@ -192,6 +231,8 @@ public class Fachada implements FachadaIncentivos {
 
   @Override
   public void asignarMisionADonador(String donadorID, MisionDTO misionDTO) throws NoSuchElementException {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.asignarMisionADonador - donador={} mision={}", requestId, donadorID, misionDTO==null?null:misionDTO.id());
     if (misionDTO == null) {
       throw new RuntimeException("Mision nula");
     }
@@ -210,11 +251,15 @@ public class Fachada implements FachadaIncentivos {
     }
 
     asignacionesRepo.setMision(donadorID, misionDTO.id());
+    logger.info("[{}] Fachada.asignarMisionADonador - done donador={} mision={}", requestId, donadorID, misionDTO.id());
   }
 
   @Override
   public void asignarInsigniaADonador(String donadorID, InsigniaDTO insigniaDTO)
       throws NoSuchElementException {
+
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.asignarInsigniaADonador - donador={} insignia={}", requestId, donadorID, insigniaDTO==null?null:insigniaDTO.id());
 
     if (insigniaDTO == null) {
       throw new RuntimeException("Insignia nula");
@@ -234,10 +279,13 @@ public class Fachada implements FachadaIncentivos {
     }
 
     asignacionesRepo.setInsignia(donadorID, insigniaDTO.id());
+    logger.info("[{}] Fachada.asignarInsigniaADonador - done donador={} insignia={}", requestId, donadorID, insigniaDTO.id());
   }
 
   // registrar cambio de categoria y mantener historial
   public void registrarCambioCategoriaEnDonador(String donadorID, String nuevaCategoria) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.registrarCambioCategoriaEnDonador - donador={} nuevaCategoria={}", requestId, donadorID, nuevaCategoria);
     try {
       var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
       if (don == null) {
@@ -246,6 +294,7 @@ public class Fachada implements FachadaIncentivos {
         asignacionesRepo.agregarCategoriaAnterior(donadorID, don.categoria());
       // actualizar en la fachada de donadores
       fachadaDonadoresYEntidades.modifcarCategoria(donadorID, nuevaCategoria);
+      logger.info("[{}] Fachada.registrarCambioCategoriaEnDonador - done donador={}", requestId, donadorID);
     } catch (RuntimeException e) {
       throw new RuntimeException(e);
     }
@@ -262,6 +311,8 @@ public class Fachada implements FachadaIncentivos {
 
   @Override
   public void procesarDonador(String donadorID) throws NoSuchElementException {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] Fachada.procesarDonador - inicio donador={}", requestId, donadorID);
     try {
       fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
     } catch (RuntimeException e) {
@@ -324,6 +375,8 @@ public class Fachada implements FachadaIncentivos {
 
       // Remover mision actual
       asignacionesRepo.removeMision(donadorID);
+
+      logger.info("[{}] Fachada.procesarDonador - mision completada donador={} mision={} ", requestId, donadorID, misionActual.getId());
 
       if (nuevaCategoria != null) {
         // encontrar proxima mision
