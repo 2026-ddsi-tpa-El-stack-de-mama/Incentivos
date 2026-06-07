@@ -1,14 +1,32 @@
 package ar.edu.utn.dds.k3003.model.incentivos;
 
+import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.CategoriaDonadorEnum;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.TipoMisionEnum;
+import jakarta.persistence.*;
+import java.util.UUID;
 
+@Entity
+@Table(name = "misiones")
 public class Mision {
-  private String id;
+
+  @Id
+  @GeneratedValue(strategy = GenerationType.UUID)
+  private UUID id;
+
   private String nombre;
-  private String insigniaID;
-  private String categoriaInicio;
-  private String categoriaFin;
+
+  @Enumerated(EnumType.STRING)
   private TipoMisionEnum tipo;
+
+  @Enumerated(EnumType.STRING)
+  private CategoriaDonadorEnum categoriaInicio;
+
+  @Enumerated(EnumType.STRING)
+  private CategoriaDonadorEnum categoriaFin;
+
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "insignia_id")
+  private Insignia insignia;
 
   public Mision() {}
 
@@ -17,20 +35,20 @@ public class Mision {
   }
 
   public Mision(String id, String nombre, String insigniaID, String categoriaInicio, String categoriaFin, TipoMisionEnum tipo) {
-    this.id = id;
+    this.id = id != null ? UUID.fromString(id) : null;
     this.nombre = nombre;
-    this.insigniaID = insigniaID;
-    this.categoriaInicio = categoriaInicio;
-    this.categoriaFin = categoriaFin;
     this.tipo = tipo;
+    this.categoriaInicio = categoriaInicio != null ? CategoriaDonadorEnum.valueOf(categoriaInicio) : null;
+    this.categoriaFin = categoriaFin != null ? CategoriaDonadorEnum.valueOf(categoriaFin) : null;
+    // insigniaID se setea mediante setInsigniaID si es necesario
   }
 
   public String getId() {
-    return id;
+    return id != null ? id.toString() : null;
   }
 
   public void setId(String id) {
-    this.id = id;
+    this.id = id != null ? UUID.fromString(id) : null;
   }
 
   public String getNombre() {
@@ -42,27 +60,27 @@ public class Mision {
   }
 
   public String getInsigniaID() {
-    return insigniaID;
+    return insignia != null ? insignia.getId() : null;
   }
 
   public void setInsigniaID(String insigniaID) {
-    this.insigniaID = insigniaID;
+    // Este método se mantiene por compatibilidad; la relación real es con la entidad Insignia
   }
 
   public String getCategoriaInicio() {
-    return categoriaInicio;
+    return categoriaInicio != null ? categoriaInicio.name() : null;
   }
 
   public void setCategoriaInicio(String categoriaInicio) {
-    this.categoriaInicio = categoriaInicio;
+    this.categoriaInicio = categoriaInicio != null ? CategoriaDonadorEnum.valueOf(categoriaInicio) : null;
   }
 
   public String getCategoriaFin() {
-    return categoriaFin;
+    return categoriaFin != null ? categoriaFin.name() : null;
   }
 
   public void setCategoriaFin(String categoriaFin) {
-    this.categoriaFin = categoriaFin;
+    this.categoriaFin = categoriaFin != null ? CategoriaDonadorEnum.valueOf(categoriaFin) : null;
   }
 
   public TipoMisionEnum getTipo() {
@@ -73,5 +91,12 @@ public class Mision {
     this.tipo = tipo;
   }
 
+  public Insignia getInsignia() {
+    return insignia;
+  }
+
+  public void setInsignia(Insignia insignia) {
+    this.insignia = insignia;
+  }
 }
 

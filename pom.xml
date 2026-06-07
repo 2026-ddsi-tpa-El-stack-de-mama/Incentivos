@@ -50,9 +50,16 @@
 
     <!-- Database -->
     <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- H2 for testing (optional) -->
+    <dependency>
       <groupId>com.h2database</groupId>
       <artifactId>h2</artifactId>
-      <scope>runtime</scope>
+      <scope>test</scope>
     </dependency>
 
     <!-- Existing Dependencies -->
