@@ -11,6 +11,7 @@ import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaIncentivos;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonaciones;
 import ar.edu.utn.dds.k3003.model.incentivos.*;
 import ar.edu.utn.dds.k3003.repositories.incentivos.*;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +40,7 @@ public class Fachada implements FachadaIncentivos {
     // Constructor vacío para compatibilidad con tests
   }
 
+  @Autowired
   public Fachada(
       InsigniaRepository insigniaRepository,
       MisionRepository misionRepository,

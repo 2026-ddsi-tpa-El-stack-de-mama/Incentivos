@@ -48,6 +48,12 @@
       <optional>true</optional>
     </dependency>
 
+    <!-- Datadog -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-datadog</artifactId>
+    </dependency>
+
     <!-- Database -->
     <dependency>
       <groupId>org.postgresql</groupId>
