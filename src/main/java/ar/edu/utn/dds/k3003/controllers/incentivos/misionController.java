@@ -1,5 +1,6 @@
 package ar.edu.utn.dds.k3003.controllers.incentivos;
 
+import ar.edu.utn.dds.k3003.config.MetricasNegocio;
 import ar.edu.utn.dds.k3003.Fachada;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.MisionDTO;
 import java.util.List;
@@ -23,10 +24,12 @@ import org.slf4j.MDC;
 public class misionController {
 
   private final Fachada fachada;
+  private final MetricasNegocio metricas;
   private static final Logger logger = LoggerFactory.getLogger(misionController.class);
 
-  public misionController(Fachada fachada) {
+  public misionController(Fachada fachada, MetricasNegocio metricas) {
     this.fachada = fachada;
+    this.metricas = metricas;
   }
 
   @PostMapping
@@ -35,12 +38,16 @@ public class misionController {
     logger.info("[{}] POST /misiones - crear mision: {}", requestId, misionDTO);
 
     if (misionDTO == null) {
+      metricas.errores400.increment();
       return ResponseEntity.badRequest().header("X-Request-Id", requestId).body("Mision nula");
     }
 
     try {
-      return ResponseEntity.status(HttpStatus.CREATED).header("X-Request-Id", requestId).body(fachada.agregarMision(misionDTO));
+      MisionDTO creada = fachada.agregarMision(misionDTO);
+      metricas.misionesCreadas.increment();
+      return ResponseEntity.status(HttpStatus.CREATED).header("X-Request-Id", requestId).body(creada);
     } catch (RuntimeException ex) {
+      metricas.errores400.increment();
       logger.warn("[{}] POST /misiones - error: {}", requestId, ex.getMessage());
       return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
     }
@@ -54,28 +61,33 @@ public class misionController {
     logger.info("[{}] PUT /misiones/{} - modificar mision: {}", requestId, misionID, misionDTO);
 
     if (misionDTO == null) {
+      metricas.errores400.increment();
       return ResponseEntity.badRequest().header("X-Request-Id", requestId).body("Mision nula");
     }
     if (misionDTO.id() != null && !misionID.equals(misionDTO.id())) {
+      metricas.errores400.increment();
       return ResponseEntity.badRequest().header("X-Request-Id", requestId).body("Id de mision inconsistente");
     }
 
     try {
-      return ResponseEntity.ok().header("X-Request-Id", requestId).body(
-          fachada.modificarMision(
-              new MisionDTO(
-                  misionID,
-                  misionDTO.nombre(),
-                  misionDTO.insigniaID(),
-                  misionDTO.categoriaInicio(),
-                  misionDTO.categoriaFin(),
-                  misionDTO.tipo())));
+      MisionDTO modificada = fachada.modificarMision(
+          new MisionDTO(
+              misionID,
+              misionDTO.nombre(),
+              misionDTO.insigniaID(),
+              misionDTO.categoriaInicio(),
+              misionDTO.categoriaFin(),
+              misionDTO.tipo()));
+      return ResponseEntity.ok().header("X-Request-Id", requestId).body(modificada);
     } catch (NoSuchElementException ex) {
+      metricas.errores404.increment();
       return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
     } catch (RuntimeException ex) {
       if (ex.getMessage() != null && ex.getMessage().toLowerCase().contains("inexistente")) {
+        metricas.errores404.increment();
         return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
       }
+      metricas.errores400.increment();
       return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
     }
   }
@@ -88,11 +100,14 @@ public class misionController {
       fachada.eliminarMision(misionID);
       return ResponseEntity.ok().header("X-Request-Id", requestId).body("Mision eliminada exitosamente");
     } catch (NoSuchElementException ex) {
+      metricas.errores404.increment();
       return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
     } catch (RuntimeException ex) {
       if (ex.getMessage() != null && ex.getMessage().toLowerCase().contains("inexistente")) {
+        metricas.errores404.increment();
         return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
       }
+      metricas.errores400.increment();
       return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
     }
   }
@@ -112,6 +127,7 @@ public class misionController {
     try {
       return ResponseEntity.ok().header("X-Request-Id", requestId).body(fachada.buscarMisionPorID(misionID));
     } catch (NoSuchElementException ex) {
+      metricas.errores404.increment();
       return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
     }
   }
@@ -125,10 +141,13 @@ public class misionController {
     try {
       MisionDTO misionDTO = fachada.buscarMisionPorID(misionID);
       fachada.asignarMisionADonador(donadorID, misionDTO);
+      metricas.misionesAsignadas.increment();
       return ResponseEntity.status(HttpStatus.OK).header("X-Request-Id", requestId).body("Misión asignada exitosamente");
     } catch (NoSuchElementException ex) {
+      metricas.errores404.increment();
       return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
     } catch (RuntimeException ex) {
+      metricas.errores400.increment();
       return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
     }
   }
@@ -141,8 +160,10 @@ public class misionController {
       MisionDTO mision = fachada.getMisionEnCursoDeDonador(donadorID);
       return ResponseEntity.ok().header("X-Request-Id", requestId).body(mision);
     } catch (NoSuchElementException ex) {
+      metricas.errores404.increment();
       return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
     } catch (Exception ex) {
+      metricas.errores500.increment();
       return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).header("X-Request-Id", requestId).body(ex.getMessage());
     }
   }
@@ -153,14 +174,17 @@ public class misionController {
     logger.info("[{}] POST /misiones/donadores/{}/procesar - procesar donador", requestId, donadorID);
     try {
       fachada.procesarDonador(donadorID);
+      metricas.donadoresProcesados.increment();
       return ResponseEntity.ok().header("X-Request-Id", requestId).body("Donador procesado exitosamente");
     } catch (NoSuchElementException ex) {
+      metricas.errores404.increment();
       return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
     } catch (RuntimeException ex) {
+      metricas.errores400.increment();
       return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
     } catch (Exception ex) {
+      metricas.errores500.increment();
       return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).header("X-Request-Id", requestId).body(ex.getMessage());
     }
   }
-
 }
