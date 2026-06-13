@@ -6,9 +6,10 @@ import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.ProductoDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.donadoresYEntidades.DonadorDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.donadoresYEntidades.NecesidadMaterialDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.*;
+import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonaciones;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonadoresYEntidades;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaIncentivos;
-import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonaciones;
+import ar.edu.utn.dds.k3003.clientes.DonacionesClient;
 import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
 import ar.edu.utn.dds.k3003.model.incentivos.*;
 import ar.edu.utn.dds.k3003.repositories.incentivos.*;
@@ -32,13 +33,11 @@ public class Fachada implements FachadaIncentivos {
   private DonadorMisionRepository donadorMisionRepository;
   private MisionHistoricoRepository misionHistoricoRepository;
   private DonadoresYEntidadesClient donadoresYEntidadesClient;
-  private FachadaDonaciones fachadaDonaciones;
+  private DonacionesClient donacionesClient;
 
   private static final Logger logger = LoggerFactory.getLogger(Fachada.class);
 
-  public Fachada() {
-    // Constructor vacío para compatibilidad con tests
-  }
+  public Fachada() {}
 
   @Autowired
   public Fachada(
@@ -47,13 +46,15 @@ public class Fachada implements FachadaIncentivos {
       DonadorInsigniaRepository donadorInsigniaRepository,
       DonadorMisionRepository donadorMisionRepository,
       MisionHistoricoRepository misionHistoricoRepository,
-      DonadoresYEntidadesClient donadoresYEntidadesClient) {
+      DonadoresYEntidadesClient donadoresYEntidadesClient,
+      DonacionesClient donacionesClient) {
     this.insigniaRepository = insigniaRepository;
     this.misionRepository = misionRepository;
     this.donadorInsigniaRepository = donadorInsigniaRepository;
     this.donadorMisionRepository = donadorMisionRepository;
     this.misionHistoricoRepository = misionHistoricoRepository;
     this.donadoresYEntidadesClient = donadoresYEntidadesClient;
+    this.donacionesClient = donacionesClient;
   }
 
   @Override
@@ -235,79 +236,86 @@ public class Fachada implements FachadaIncentivos {
 
   @Override
   public void procesarDonador(String donadorID) {
-    // Valida existencia del donador en el microservicio externo
     donadoresYEntidadesClient.obtenerDonador(donadorID);
+
+    UUID donadorUUID = UUID.fromString(donadorID);
+    Optional<DonadorMision> misionActual = donadorMisionRepository.findByDonadorId(donadorUUID);
+
+    // Si no tiene misión activa, no hay nada que evaluar
+    if (misionActual.isEmpty()) return;
+
+    DonadorMision donadorMision = misionActual.get();
+    Mision mision = donadorMision.getMision();
+    LocalDate fechaAsignacion = donadorMision.getFechaAsignacion().toLocalDate();
 
     List<DonacionDTO> donaciones;
     try {
-      donaciones = this.fachadaDonaciones.buscarPorDonadorYFechaInicio(donadorID, LocalDate.of(1970, 1, 1));
+      donaciones = donacionesClient.buscarPorDonadorYFechaInicio(donadorID, fechaAsignacion);
     } catch (RuntimeException e) {
       throw new RuntimeException(e);
     }
 
     if (donaciones == null) donaciones = List.of();
 
-    UUID donadorUUID = UUID.fromString(donadorID);
-    Optional<DonadorMision> misionActual = donadorMisionRepository.findByDonadorId(donadorUUID);
-
-    if (misionActual.isEmpty()) return;
-
-    Mision mision = misionActual.get().getMision();
     boolean completada = evaluarMision(mision, donaciones);
 
-    if (completada) {
-      if (mision.getInsignia() != null) {
-        try {
-          asignarInsigniaADonador(donadorID, IncentivosMapper.toDto(mision.getInsignia()));
-        } catch (RuntimeException e) {
-          // ignored
-        }
-      }
+    if (!completada) return;
 
-      String categoriaFin = mision.getCategoriaFin();
-      if (categoriaFin != null) {
-        try {
-          registrarCambioCategoriaEnDonador(donadorID, categoriaFin);
-        } catch (RuntimeException e) {
-          // ignored
-        }
-      }
-
-      final String misionIdString = mision.getId();
-      List<MisionHistorico> historial = misionHistoricoRepository.findByDonadorId(donadorUUID);
-      for (MisionHistorico hist : historial) {
-        if (hist.getEstado() == MisionHistorico.EstadoMision.ACTIVA && hist.getMision().getId().equals(misionIdString)) {
-          hist.setEstado(MisionHistorico.EstadoMision.COMPLETADA);
-          hist.setFechaFin(LocalDateTime.now());
-          misionHistoricoRepository.save(hist);
-          break;
-        }
-      }
-
-      donadorMisionRepository.deleteById(donadorUUID);
-
-      String nuevaCategoria = null;
+    // Asignar insignia si corresponde
+    if (mision.getInsignia() != null) {
       try {
-        DonadorDTO don = donadoresYEntidadesClient.obtenerDonador(donadorID);
-        nuevaCategoria = don.categoria();
+        asignarInsigniaADonador(donadorID, IncentivosMapper.toDto(mision.getInsignia()));
+      } catch (RuntimeException e) {
+        // ignored: puede ya tenerla
+      }
+    }
+
+    // Cambiar categoría si la misión define una categoría de fin
+    String categoriaFin = mision.getCategoriaFin();
+    if (categoriaFin != null) {
+      try {
+        registrarCambioCategoriaEnDonador(donadorID, categoriaFin);
       } catch (RuntimeException e) {
         // ignored
       }
+    }
 
-      if (nuevaCategoria != null) {
-        final String catBuscada = nuevaCategoria;
-        Optional<Mision> siguiente = misionRepository.findAll().stream()
-            .filter(m -> !m.getId().equals(misionIdString))
-            .filter(m -> m.getCategoriaInicio() != null && m.getCategoriaInicio().equals(catBuscada))
-            .findFirst();
-
-        siguiente.ifPresent(nextMision -> {
-          DonadorMision dm = new DonadorMision(donadorUUID, nextMision);
-          donadorMisionRepository.save(dm);
-          MisionHistorico historico = new MisionHistorico(donadorUUID, nextMision, MisionHistorico.EstadoMision.ACTIVA);
-          misionHistoricoRepository.save(historico);
-        });
+    // Marcar misión como completada en el historial
+    final String misionIdString = mision.getId();
+    List<MisionHistorico> historial = misionHistoricoRepository.findByDonadorId(donadorUUID);
+    for (MisionHistorico hist : historial) {
+      if (hist.getEstado() == MisionHistorico.EstadoMision.ACTIVA
+          && hist.getMision().getId().equals(misionIdString)) {
+        hist.setEstado(MisionHistorico.EstadoMision.COMPLETADA);
+        hist.setFechaFin(LocalDateTime.now());
+        misionHistoricoRepository.save(hist);
+        break;
       }
+    }
+
+    // Quitar misión activa
+    donadorMisionRepository.deleteById(donadorUUID);
+
+    // Buscar siguiente misión según la nueva categoría del donador
+    String nuevaCategoria = null;
+    try {
+      nuevaCategoria = donadoresYEntidadesClient.obtenerDonador(donadorID).categoria();
+    } catch (RuntimeException e) {
+      // Si falla, no asignamos siguiente misión
+    }
+
+    if (nuevaCategoria != null) {
+      final String catBuscada = nuevaCategoria;
+      misionRepository.findAll().stream()
+          .filter(m -> !m.getId().equals(misionIdString))
+          .filter(m -> catBuscada.equals(m.getCategoriaInicio()))
+          .findFirst()
+          .ifPresent(nextMision -> {
+            donadorMisionRepository.save(new DonadorMision(donadorUUID, nextMision));
+            misionHistoricoRepository.save(
+                new MisionHistorico(donadorUUID, nextMision, MisionHistorico.EstadoMision.ACTIVA)
+            );
+          });
     }
   }
 
@@ -343,19 +351,17 @@ public class Fachada implements FachadaIncentivos {
   private boolean evaluarCompletitud(List<DonacionDTO> donacionesAceptadas) {
     Set<String> categorias = new HashSet<>();
     boolean pudoResolverCategoria = false;
-    if (fachadaDonaciones != null) {
-      for (var donacion : donacionesAceptadas) {
-        String categoria = obtenerCategoriaProducto(donacion);
-        if (categoria != null) {
-          pudoResolverCategoria = true;
-          categorias.add(categoria);
-        }
+    for (var donacion : donacionesAceptadas) {
+      String categoria = obtenerCategoriaProducto(donacion);
+      if (categoria != null) {
+        pudoResolverCategoria = true;
+        categorias.add(categoria);
       }
     }
     if (pudoResolverCategoria) return categorias.size() >= 3;
     long depositosDistintos = donacionesAceptadas.stream()
         .map(DonacionDTO::depositoID)
-        .filter(java.util.Objects::nonNull)
+        .filter(Objects::nonNull)
         .distinct()
         .count();
     return depositosDistintos >= 3;
@@ -364,13 +370,14 @@ public class Fachada implements FachadaIncentivos {
   private String obtenerCategoriaProducto(DonacionDTO donacion) {
     if (donacion == null || donacion.productoID() == null) return null;
     try {
-      ProductoDTO producto = fachadaDonaciones.buscarProductoPorID(donacion.productoID());
+      ProductoDTO producto = donacionesClient.buscarProductoPorID(donacion.productoID());
       if (producto == null) return null;
       return producto.categoriaID();
     } catch (RuntimeException ex) {
       return null;
     }
   }
+
 
   private long contarDonacionesExitosas(List<DonacionDTO> donacionesAceptadas) {
     return donacionesAceptadas.size();
@@ -396,11 +403,12 @@ public class Fachada implements FachadaIncentivos {
 
   @Override
   public void setFachadaDonaciones(FachadaDonaciones fachadaDonaciones) {
-    this.fachadaDonaciones = fachadaDonaciones;
+    // no-op: reemplazado por DonacionesClient
   }
 
   @Override
   public void setFachadaDonadoresYEntidades(FachadaDonadoresYEntidades fachadaDonadoresYEntidades) {
+    // no-op: reemplazado por DonadoresYEntidadesClient
   }
 }
 
