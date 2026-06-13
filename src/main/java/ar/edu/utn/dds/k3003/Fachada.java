@@ -9,6 +9,7 @@ import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.*;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonadoresYEntidades;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaIncentivos;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonaciones;
+import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
 import ar.edu.utn.dds.k3003.model.incentivos.*;
 import ar.edu.utn.dds.k3003.repositories.incentivos.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,8 +31,7 @@ public class Fachada implements FachadaIncentivos {
   private DonadorInsigniaRepository donadorInsigniaRepository;
   private DonadorMisionRepository donadorMisionRepository;
   private MisionHistoricoRepository misionHistoricoRepository;
-
-  private FachadaDonadoresYEntidades fachadaDonadoresYEntidades;
+  private DonadoresYEntidadesClient donadoresYEntidadesClient;
   private FachadaDonaciones fachadaDonaciones;
 
   private static final Logger logger = LoggerFactory.getLogger(Fachada.class);
@@ -46,12 +46,14 @@ public class Fachada implements FachadaIncentivos {
       MisionRepository misionRepository,
       DonadorInsigniaRepository donadorInsigniaRepository,
       DonadorMisionRepository donadorMisionRepository,
-      MisionHistoricoRepository misionHistoricoRepository) {
+      MisionHistoricoRepository misionHistoricoRepository,
+      DonadoresYEntidadesClient donadoresYEntidadesClient) {
     this.insigniaRepository = insigniaRepository;
     this.misionRepository = misionRepository;
     this.donadorInsigniaRepository = donadorInsigniaRepository;
     this.donadorMisionRepository = donadorMisionRepository;
     this.misionHistoricoRepository = misionHistoricoRepository;
+    this.donadoresYEntidadesClient = donadoresYEntidadesClient;
   }
 
   @Override
@@ -163,45 +165,30 @@ public class Fachada implements FachadaIncentivos {
   public List<InsigniaDTO> getInsigniasDeDonador(String donadorID) {
     UUID donadorUUID = UUID.fromString(donadorID);
     List<DonadorInsignia> asignaciones = donadorInsigniaRepository.findByDonadorId(donadorUUID);
-    if (asignaciones.isEmpty()) {
-      try {
-        var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
-        if (don == null) throw new NoSuchElementException("Donador inexistente");
-      } catch (RuntimeException e) {
-        throw new RuntimeException(e);
-      }
-      return List.of();
-    }
-    return asignaciones.stream().map(DonadorInsignia::getInsignia).map(IncentivosMapper::toDto).collect(Collectors.toList());
+    return asignaciones.stream()
+        .map(DonadorInsignia::getInsignia)
+        .map(IncentivosMapper::toDto)
+        .collect(Collectors.toList());
   }
 
   @Override
   public MisionDTO getMisionEnCursoDeDonador(String donadorID) {
     UUID donadorUUID = UUID.fromString(donadorID);
-    Optional<DonadorMision> actual = donadorMisionRepository.findByDonadorId(donadorUUID);
-    if (actual.isEmpty()) {
-      try {
-        var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
-        if (don == null) throw new NoSuchElementException("Donador inexistente");
-      } catch (RuntimeException e) {
-        throw new RuntimeException(e);
-      }
-      return null;
-    }
-    return IncentivosMapper.toDto(actual.get().getMision());
+    return donadorMisionRepository.findByDonadorId(donadorUUID)
+        .map(dm -> IncentivosMapper.toDto(dm.getMision()))
+        .orElse(null);
   }
 
   @Override
   public void asignarMisionADonador(String donadorID, MisionDTO misionDTO) {
     if (misionDTO == null) throw new RuntimeException("Mision nula");
-    try {
-      var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
-      if (don == null) throw new RuntimeException("Donador inexistente");
-    } catch (RuntimeException e) {
-      throw new RuntimeException(e);
-    }
+
+    // Valida existencia del donador en el microservicio externo
+    donadoresYEntidadesClient.obtenerDonador(donadorID);
+
     UUID misionUUID = UUID.fromString(misionDTO.id());
-    Mision mision = misionRepository.findById(misionUUID).orElseThrow(() -> new RuntimeException("Mision inexistente"));
+    Mision mision = misionRepository.findById(misionUUID)
+        .orElseThrow(() -> new RuntimeException("Mision inexistente"));
     UUID donadorUUID = UUID.fromString(donadorID);
     DonadorMision dm = new DonadorMision(donadorUUID, mision);
     donadorMisionRepository.save(dm);
@@ -212,27 +199,22 @@ public class Fachada implements FachadaIncentivos {
   @Override
   public void asignarInsigniaADonador(String donadorID, InsigniaDTO insigniaDTO) {
     if (insigniaDTO == null) throw new RuntimeException("Insignia nula");
-    try {
-      var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
-      if (don == null) throw new RuntimeException("Donador inexistente");
-    } catch (RuntimeException e) {
-      throw new RuntimeException(e);
-    }
+
+    // Valida existencia del donador en el microservicio externo
+    donadoresYEntidadesClient.obtenerDonador(donadorID);
+
     UUID insigniaUUID = UUID.fromString(insigniaDTO.id());
-    Insignia insignia = insigniaRepository.findById(insigniaUUID).orElseThrow(() -> new RuntimeException("Insignia inexistente"));
+    Insignia insignia = insigniaRepository.findById(insigniaUUID)
+        .orElseThrow(() -> new RuntimeException("Insignia inexistente"));
     UUID donadorUUID = UUID.fromString(donadorID);
     DonadorInsignia di = new DonadorInsignia(donadorUUID, insignia);
     donadorInsigniaRepository.save(di);
   }
 
   public void registrarCambioCategoriaEnDonador(String donadorID, String nuevaCategoria) {
-    try {
-      var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
-      if (don == null) throw new RuntimeException("Donador inexistente");
-      fachadaDonadoresYEntidades.modifcarCategoria(donadorID, nuevaCategoria);
-    } catch (RuntimeException e) {
-      throw new RuntimeException(e);
-    }
+    // Valida existencia antes de modificar
+    donadoresYEntidadesClient.obtenerDonador(donadorID);
+    donadoresYEntidadesClient.modificarCategoria(donadorID, nuevaCategoria);
   }
 
   public List<String> historialCategorias(String donadorID) {
@@ -253,11 +235,8 @@ public class Fachada implements FachadaIncentivos {
 
   @Override
   public void procesarDonador(String donadorID) {
-    try {
-      fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
-    } catch (RuntimeException e) {
-      throw new RuntimeException(e);
-    }
+    // Valida existencia del donador en el microservicio externo
+    donadoresYEntidadesClient.obtenerDonador(donadorID);
 
     List<DonacionDTO> donaciones;
     try {
@@ -309,7 +288,7 @@ public class Fachada implements FachadaIncentivos {
 
       String nuevaCategoria = null;
       try {
-        var don = fachadaDonadoresYEntidades.buscarDonadorPorID(donadorID);
+        DonadorDTO don = donadoresYEntidadesClient.obtenerDonador(donadorID);
         nuevaCategoria = don.categoria();
       } catch (RuntimeException e) {
         // ignored
@@ -343,7 +322,7 @@ public class Fachada implements FachadaIncentivos {
 
     return switch (tipoMision) {
       case COMPLETITUD -> evaluarCompletitud(donacionesAceptadas);
-      case DONACIONES_EXITOSAS ->contarDonacionesExitosas(donacionesAceptadas) >= 20;
+      case DONACIONES_EXITOSAS -> contarDonacionesExitosas(donacionesAceptadas) >= 20;
       case DONACIONES_ASCENDENTES -> evaluarDonacionesAscendentes(donacionesAceptadas);
       case REVOLUCION_DONADORA -> contarDonacionesGrandes(donacionesAceptadas) > 10;
     };
@@ -422,7 +401,6 @@ public class Fachada implements FachadaIncentivos {
 
   @Override
   public void setFachadaDonadoresYEntidades(FachadaDonadoresYEntidades fachadaDonadoresYEntidades) {
-    this.fachadaDonadoresYEntidades = fachadaDonadoresYEntidades;
   }
 }
 

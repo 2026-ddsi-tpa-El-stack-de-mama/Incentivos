@@ -5,6 +5,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import ar.edu.utn.dds.k3003.exceptions.ExternalBadRequestException;
+import ar.edu.utn.dds.k3003.exceptions.ExternalServiceException;
 import org.slf4j.MDC;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -52,6 +54,15 @@ public class GlobalExceptionHandler {
     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).header("X-Request-Id", requestId).body(body);
   }
 
+  @ExceptionHandler(ExternalBadRequestException.class)
+  public ResponseEntity<String> handleBadRequest(ExternalBadRequestException e) {
+    return ResponseEntity.status(400).body(e.getMessage());
+  }
+
+  @ExceptionHandler(ExternalServiceException.class)
+  public ResponseEntity<String> handleServiceError(ExternalServiceException e) {
+    return ResponseEntity.status(500).body(e.getMessage());
+  }
 }
 
 

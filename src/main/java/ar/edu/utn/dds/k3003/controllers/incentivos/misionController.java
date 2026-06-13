@@ -158,6 +158,11 @@ public class misionController {
     logger.info("[{}] GET /misiones/donadores/{}/mision - obtener mision en curso", requestId, donadorID);
     try {
       MisionDTO mision = fachada.getMisionEnCursoDeDonador(donadorID);
+      if (mision == null) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .header("X-Request-Id", requestId)
+            .body("El donador no tiene misión en curso");
+      }
       return ResponseEntity.ok().header("X-Request-Id", requestId).body(mision);
     } catch (NoSuchElementException ex) {
       metricas.errores404.increment();
