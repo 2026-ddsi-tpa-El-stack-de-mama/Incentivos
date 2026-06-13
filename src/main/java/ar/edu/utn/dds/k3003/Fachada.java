@@ -359,20 +359,18 @@ public class Fachada implements FachadaIncentivos {
       }
     }
     if (pudoResolverCategoria) return categorias.size() >= 3;
-    long depositosDistintos = donacionesAceptadas.stream()
+    return donacionesAceptadas.stream()
         .map(DonacionDTO::depositoID)
         .filter(Objects::nonNull)
         .distinct()
-        .count();
-    return depositosDistintos >= 3;
+        .count() >= 3;
   }
 
   private String obtenerCategoriaProducto(DonacionDTO donacion) {
     if (donacion == null || donacion.productoID() == null) return null;
     try {
       ProductoDTO producto = donacionesClient.buscarProductoPorID(donacion.productoID());
-      if (producto == null) return null;
-      return producto.categoriaID();
+      return producto != null ? producto.categoriaID() : null;
     } catch (RuntimeException ex) {
       return null;
     }
