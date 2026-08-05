@@ -4,6 +4,7 @@ import ar.edu.utn.dds.k3003.config.MetricasNegocio;
 import ar.edu.utn.dds.k3003.Fachada;
 import java.util.List;
 import java.util.NoSuchElementException;
+import ar.edu.utn.dds.k3003.dtos.CambioCategoriaDTO;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -51,7 +52,7 @@ public class donadorController {
   }
 
   @GetMapping("/{donadorID}/categorias/historial")
-  public ResponseEntity<List<String>> historialCategorias(@PathVariable("donadorID") String donadorID) {
+  public ResponseEntity<List<CambioCategoriaDTO>> historialCategorias(@PathVariable("donadorID") String donadorID) {
     return ResponseEntity.ok(fachada.historialCategorias(donadorID));
   }
 

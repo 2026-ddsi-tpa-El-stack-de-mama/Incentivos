@@ -11,6 +11,8 @@ import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaDonadoresYEntidades;
 import ar.edu.utn.dds.k3003.catedra.fachadas.FachadaIncentivos;
 import ar.edu.utn.dds.k3003.clientes.DonacionesClient;
 import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
+import ar.edu.utn.dds.k3003.dtos.CambioCategoriaDTO;
+import ar.edu.utn.dds.k3003.dtos.MisionHistoricoDTO;
 import ar.edu.utn.dds.k3003.model.incentivos.*;
 import ar.edu.utn.dds.k3003.repositories.incentivos.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -33,6 +35,7 @@ public class Fachada implements FachadaIncentivos {
   private DonadorMisionRepository donadorMisionRepository;
   private MisionHistoricoRepository misionHistoricoRepository;
   private DonadoresYEntidadesClient donadoresYEntidadesClient;
+  private CambioCategoriaHistoricoRepository cambioCategoriaHistoricoRepository;
   private DonacionesClient donacionesClient;
 
   private static final Logger logger = LoggerFactory.getLogger(Fachada.class);
@@ -47,6 +50,7 @@ public class Fachada implements FachadaIncentivos {
       DonadorMisionRepository donadorMisionRepository,
       MisionHistoricoRepository misionHistoricoRepository,
       DonadoresYEntidadesClient donadoresYEntidadesClient,
+      CambioCategoriaHistoricoRepository cambioCategoriaHistoricoRepository,
       DonacionesClient donacionesClient) {
     this.insigniaRepository = insigniaRepository;
     this.misionRepository = misionRepository;
@@ -54,6 +58,7 @@ public class Fachada implements FachadaIncentivos {
     this.donadorMisionRepository = donadorMisionRepository;
     this.misionHistoricoRepository = misionHistoricoRepository;
     this.donadoresYEntidadesClient = donadoresYEntidadesClient;
+    this.cambioCategoriaHistoricoRepository = cambioCategoriaHistoricoRepository;
     this.donacionesClient = donacionesClient;
   }
 
@@ -166,6 +171,9 @@ public class Fachada implements FachadaIncentivos {
   public List<InsigniaDTO> getInsigniasDeDonador(String donadorID) {
     UUID donadorUUID = UUID.fromString(donadorID);
     List<DonadorInsignia> asignaciones = donadorInsigniaRepository.findByDonadorId(donadorUUID);
+    if (asignaciones.isEmpty()) {
+      throw new NoSuchElementException("El donador no tiene insignias asignadas");
+    }
     return asignaciones.stream()
         .map(DonadorInsignia::getInsignia)
         .map(IncentivosMapper::toDto)
@@ -177,7 +185,7 @@ public class Fachada implements FachadaIncentivos {
     UUID donadorUUID = UUID.fromString(donadorID);
     return donadorMisionRepository.findByDonadorId(donadorUUID)
         .map(dm -> IncentivosMapper.toDto(dm.getMision()))
-        .orElse(null);
+        .orElseThrow(() -> new NoSuchElementException("El donador no tiene mision en curso"));
   }
 
   @Override
@@ -213,13 +221,26 @@ public class Fachada implements FachadaIncentivos {
   }
 
   public void registrarCambioCategoriaEnDonador(String donadorID, String nuevaCategoria) {
-    // Valida existencia antes de modificar
-    donadoresYEntidadesClient.obtenerDonador(donadorID);
+    DonadorDTO donador = donadoresYEntidadesClient.obtenerDonador(donadorID);
+    String categoriaAnterior = donador.categoria();
+
     donadoresYEntidadesClient.modificarCategoria(donadorID, nuevaCategoria);
+
+    UUID donadorUUID = UUID.fromString(donadorID);
+    try {
+      cambioCategoriaHistoricoRepository.save(new CambioCategoriaHistorico(donadorUUID, categoriaAnterior, nuevaCategoria));
+    } catch (RuntimeException e) {
+      logger.warn("No se pudo registrar historico de cambio de categoria para donador {}: {}", donadorID, e.getMessage(), e);
+    }
   }
 
-  public List<String> historialCategorias(String donadorID) {
-    return List.of();
+  public List<CambioCategoriaDTO> historialCategorias(String donadorID) {
+    UUID donadorUUID = UUID.fromString(donadorID);
+    List<CambioCategoriaHistorico> historial =
+        cambioCategoriaHistoricoRepository.findByDonadorIdOrderByFechaDesc(donadorUUID);
+    return historial.stream()
+        .map(h -> new CambioCategoriaDTO(h.getCategoriaAnterior(), h.getCategoriaNueva(), h.getFecha()))
+        .collect(Collectors.toList());
   }
 
   public DonadorDTO agregarDonador(DonadorDTO donadorDTO) {
@@ -234,66 +255,97 @@ public class Fachada implements FachadaIncentivos {
     throw new UnsupportedOperationException();
   }
 
+  // NOTA (punto 7 del prompt): esta secuencia NO es atómica y deliberadamente no se
+  // envuelve en @Transactional. Los pasos "asignar insignia" y "cambiar categoría"
+  // llaman a donadoresYEntidadesClient (HTTP externo) — mantener una transacción de
+  // DB abierta durante llamadas de red retiene conexiones del pool y no protege esos
+  // efectos igual, porque no son recursos transaccionales de la DB. Clasificación:
+  //   - best-effort (no abortan el proceso si fallan): asignar insignia, cambiar categoría.
+  //   - crítico (si fallan, el estado queda inconsistente y se loguea como WARN):
+  //     marcar historial COMPLETADA, borrar la misión activa, asignar siguiente misión.
+  // Riesgo conocido y no resuelto en este fix: si el historial no llega a marcarse
+  // COMPLETADA (break no alcanzado) pero el deleteById sí se ejecuta, queda un
+  // registro ACTIVA huérfano sin misión activa asociada. Se decide loguear el caso
+  // (ver punto 5.5) en vez de abortar, porque abortar dejaría al donador sin misión
+  // activa y sin insignia/categoría ya otorgadas — peor resultado que un historial
+  // desincronizado que se puede reconciliar después. Discutir con el equipo si esto
+  // amerita @Transactional a nivel de los pasos críticos únicamente (excluyendo las
+  // llamadas HTTP) o un patrón de outbox/saga.
   @Override
   public void procesarDonador(String donadorID) {
+    String requestId = MDC.get("request_id");
     donadoresYEntidadesClient.obtenerDonador(donadorID);
 
     UUID donadorUUID = UUID.fromString(donadorID);
     Optional<DonadorMision> misionActual = donadorMisionRepository.findByDonadorId(donadorUUID);
 
     // Si no tiene misión activa, no hay nada que evaluar
-    if (misionActual.isEmpty()) return;
+    if (misionActual.isEmpty()) {
+      logger.info("[{}] procesarDonador - donador {} sin mision activa", requestId, donadorID);
+      return;
+    }
 
     DonadorMision donadorMision = misionActual.get();
     Mision mision = donadorMision.getMision();
     LocalDate fechaAsignacion = donadorMision.getFechaAsignacion().toLocalDate();
 
-    List<DonacionDTO> donaciones;
-    try {
-      donaciones = donacionesClient.buscarPorDonadorYFechaInicio(donadorID, fechaAsignacion);
-    } catch (RuntimeException e) {
-      throw new RuntimeException(e);
-    }
+    // Punto 6: se deja propagar la excepción original (p.ej. NoSuchElementException
+    // -> 404) en vez de envolverla en un RuntimeException genérico que el controller
+    // traduciría como 400.
+    List<DonacionDTO> donaciones = donacionesClient.buscarPorDonadorYFechaInicio(donadorID, fechaAsignacion);
 
     if (donaciones == null) donaciones = List.of();
 
     boolean completada = evaluarMision(mision, donaciones);
 
-    if (!completada) return;
+    if (!completada) {
+      logger.info("[{}] procesarDonador - donador {} no completo la mision {}",
+          requestId, donadorID, mision.getId());
+      return;
+    }
 
-    // Asignar insignia si corresponde
+    // Asignar insignia si corresponde (best-effort, ver nota de atomicidad arriba)
     if (mision.getInsignia() != null) {
       try {
         asignarInsigniaADonador(donadorID, IncentivosMapper.toDto(mision.getInsignia()));
       } catch (RuntimeException e) {
-        // ignored: puede ya tenerla
+        logger.warn("[{}] procesarDonador - fallo al asignar insignia a donador {}: {}",
+            requestId, donadorID, e.getMessage(), e);
       }
     }
 
-    // Cambiar categoría si la misión define una categoría de fin
+    // Cambiar categoría si la misión define una categoría de fin (best-effort)
     String categoriaFin = mision.getCategoriaFin();
     if (categoriaFin != null) {
       try {
         registrarCambioCategoriaEnDonador(donadorID, categoriaFin);
       } catch (RuntimeException e) {
-        // ignored
+        logger.warn("[{}] procesarDonador - fallo al cambiar categoria de donador {} a {}: {}",
+            requestId, donadorID, categoriaFin, e.getMessage(), e);
       }
     }
 
     // Marcar misión como completada en el historial
     final String misionIdString = mision.getId();
     List<MisionHistorico> historial = misionHistoricoRepository.findByDonadorId(donadorUUID);
+    boolean historicoMarcado = false;
     for (MisionHistorico hist : historial) {
       if (hist.getEstado() == MisionHistorico.EstadoMision.ACTIVA
           && hist.getMision().getId().equals(misionIdString)) {
         hist.setEstado(MisionHistorico.EstadoMision.COMPLETADA);
         hist.setFechaFin(LocalDateTime.now());
         misionHistoricoRepository.save(hist);
+        historicoMarcado = true;
         break;
       }
     }
+    if (!historicoMarcado) {
+      logger.warn("[{}] procesarDonador - no se encontro historico ACTIVA para donador {} y mision {}; "
+              + "se continua con deleteById, el historial puede quedar desincronizado",
+          requestId, donadorID, misionIdString);
+    }
 
-    // Quitar misión activa
+    // Quitar misión activa (crítico, ver nota de atomicidad arriba)
     donadorMisionRepository.deleteById(donadorUUID);
 
     // Buscar siguiente misión según la nueva categoría del donador
@@ -301,39 +353,84 @@ public class Fachada implements FachadaIncentivos {
     try {
       nuevaCategoria = donadoresYEntidadesClient.obtenerDonador(donadorID).categoria();
     } catch (RuntimeException e) {
-      // Si falla, no asignamos siguiente misión
+      logger.warn("[{}] procesarDonador - no se pudo obtener la nueva categoria del donador {}, "
+              + "no se asignara siguiente mision: {}",
+          requestId, donadorID, e.getMessage(), e);
     }
 
     if (nuevaCategoria != null) {
       final String catBuscada = nuevaCategoria;
-      misionRepository.findAll().stream()
+      Optional<Mision> siguienteMision = misionRepository.findAll().stream()
           .filter(m -> !m.getId().equals(misionIdString))
           .filter(m -> catBuscada.equals(m.getCategoriaInicio()))
-          .findFirst()
-          .ifPresent(nextMision -> {
-            donadorMisionRepository.save(new DonadorMision(donadorUUID, nextMision));
-            misionHistoricoRepository.save(
-                new MisionHistorico(donadorUUID, nextMision, MisionHistorico.EstadoMision.ACTIVA)
-            );
-          });
+          .findFirst();
+
+      if (siguienteMision.isPresent()) {
+        Mision nextMision = siguienteMision.get();
+        donadorMisionRepository.save(new DonadorMision(donadorUUID, nextMision));
+        misionHistoricoRepository.save(
+            new MisionHistorico(donadorUUID, nextMision, MisionHistorico.EstadoMision.ACTIVA)
+        );
+      } else {
+        logger.info("[{}] procesarDonador - no hay siguiente mision para la categoria {} (donador {})",
+            requestId, catBuscada, donadorID);
+      }
     }
   }
 
-  private boolean evaluarMision(Mision misionActual, List<DonacionDTO> donaciones) {
-    var donacionesAceptadas = donaciones.stream()
-        .filter(d -> d != null && d.estado() == EstadoDonacionEnum.ACEPTADA)
+  public List<MisionHistoricoDTO> historialMisiones(String donadorID) {
+    UUID donadorUUID = UUID.fromString(donadorID);
+    List<MisionHistorico> historial =
+        misionHistoricoRepository.findByDonadorIdOrderByFechaInicioDesc(donadorUUID);
+    if (historial.isEmpty()) {
+      throw new NoSuchElementException("El donador no tiene historial de misiones");
+    }
+    return historial.stream()
+        .map(h -> new MisionHistoricoDTO(
+            h.getMision().getId(),
+            h.getMision().getNombre(),
+            h.getEstado().name(),
+            h.getFechaInicio(),
+            h.getFechaFin()))
         .collect(Collectors.toList());
+  }
 
+  // Punto 4 del prompt — DECISIÓN DE NEGOCIO PENDIENTE DE CONFIRMAR CON EL EQUIPO:
+  // El enunciado justifica el filtro por ACEPTADA textualmente solo para
+  // DONACIONES_EXITOSAS ("recibidas correctamente... sin quejas"). Para las otras 3
+  // misiones no hay ese requisito explícito en el enunciado que tengo disponible.
+  // Abajo dejo el filtro DESACOPLADO por tipo de misión en vez de aplicarlo una sola
+  // vez de forma global, para que la decisión sea explícita y unitaria por tipo.
+  // Elegí, como default conservador, mantener ACEPTADA también para COMPLETITUD,
+  // DONACIONES_ASCENDENTES y REVOLUCION_DONADORA, porque evaluar sobre donaciones
+  // en estado INGRESADA (no confirmadas) podría completar una misión con
+  // donaciones que después se rechazan. PERO esto es una hipótesis mía, no un
+  // hecho verificado contra el enunciado completo — hay que confirmarlo con el
+  // equipo antes de mergear. Si se decide lo contrario para algún tipo, cambiar
+  // solo esa rama.
+  private boolean evaluarMision(Mision misionActual, List<DonacionDTO> donaciones) {
     TipoMisionEnum tipoMision = misionActual.getTipo();
     if (tipoMision == null) tipoMision = inferirTipoPorNombre(misionActual.getNombre());
-    if (tipoMision == null) return contarDonacionesExitosas(donacionesAceptadas) >= 20;
+
+    List<DonacionDTO> aceptadas = filtrarPorEstado(donaciones, EstadoDonacionEnum.ACEPTADA);
+
+    if (tipoMision == null) return contarDonacionesExitosas(aceptadas) >= 20;
 
     return switch (tipoMision) {
-      case COMPLETITUD -> evaluarCompletitud(donacionesAceptadas);
-      case DONACIONES_EXITOSAS -> contarDonacionesExitosas(donacionesAceptadas) >= 20;
-      case DONACIONES_ASCENDENTES -> evaluarDonacionesAscendentes(donacionesAceptadas);
-      case REVOLUCION_DONADORA -> contarDonacionesGrandes(donacionesAceptadas) > 10;
+      case DONACIONES_EXITOSAS -> contarDonacionesExitosas(aceptadas) >= 20;
+      // TODO: confirmar con el equipo si corresponde ACEPTADA o todas las donaciones
+      case COMPLETITUD -> evaluarCompletitud(aceptadas);
+      // TODO: confirmar con el equipo si corresponde ACEPTADA o todas las donaciones
+      case DONACIONES_ASCENDENTES -> evaluarDonacionesAscendentes(aceptadas);
+      // TODO: confirmar con el equipo si corresponde ACEPTADA o todas las donaciones
+      case REVOLUCION_DONADORA -> contarDonacionesGrandes(aceptadas) > 10;
     };
+  }
+
+  private List<DonacionDTO> filtrarPorEstado(List<DonacionDTO> donaciones, EstadoDonacionEnum estado) {
+    return donaciones.stream()
+        .filter(d -> d != null && d.estado() == estado)
+        .collect(Collectors.toList());
   }
 
   private TipoMisionEnum inferirTipoPorNombre(String nombreMision) {
@@ -348,42 +445,76 @@ public class Fachada implements FachadaIncentivos {
     };
   }
 
+  // Punto 1 y 2 del prompt: se elimina el fallback por depositoID (no tiene relación
+  // con el requisito de negocio de "3 categorías distintas") y se loguean los casos
+  // en que no se pudo resolver la categoría de una donación, en vez de comerse el
+  // error silenciosamente.
   private boolean evaluarCompletitud(List<DonacionDTO> donacionesAceptadas) {
+    String requestId = MDC.get("request_id");
     Set<String> categorias = new HashSet<>();
-    boolean pudoResolverCategoria = false;
     for (var donacion : donacionesAceptadas) {
       String categoria = obtenerCategoriaProducto(donacion);
       if (categoria != null) {
-        pudoResolverCategoria = true;
         categorias.add(categoria);
+      } else if (donacion != null) {
+        logger.warn("[{}] evaluarCompletitud - no se pudo resolver categoria para donacionID={} productoID={}",
+            requestId, donacion.id(), donacion.productoID());
       }
     }
-    if (pudoResolverCategoria) return categorias.size() >= 3;
-    return donacionesAceptadas.stream()
-        .map(DonacionDTO::depositoID)
-        .filter(Objects::nonNull)
-        .distinct()
-        .count() >= 3;
+    return categorias.size() >= 3;
   }
 
   private String obtenerCategoriaProducto(DonacionDTO donacion) {
     if (donacion == null || donacion.productoID() == null) return null;
+    String requestId = MDC.get("request_id");
     try {
       ProductoDTO producto = donacionesClient.buscarProductoPorID(donacion.productoID());
       return producto != null ? producto.categoriaID() : null;
     } catch (RuntimeException ex) {
+      logger.warn("[{}] obtenerCategoriaProducto - fallo al resolver producto donacionID={} productoID={}: {}",
+          requestId, donacion.id(), donacion.productoID(), ex.getMessage(), ex);
       return null;
     }
   }
-
 
   private long contarDonacionesExitosas(List<DonacionDTO> donacionesAceptadas) {
     return donacionesAceptadas.size();
   }
 
+  // Punto 3 del prompt — BLOQUEADO EN SERIO, no es un detalle menor:
+  // Confirmaste que DonacionDTO NO tiene fecha:
+  //   record DonacionDTO(String id, String donadorID, String depositoID,
+  //       String descripcion, String productoID, Integer cantidad, EstadoDonacionEnum estado)
+  // Sin un campo temporal en el DTO, NO HAY forma correcta de ordenar cronológicamente
+  // acá. Descarté a propósito cualquier sustituto (ordenar por `id()`, o asumir que
+  // `depositoID` o el orden de inserción en la lista correlacionan con el tiempo)
+  // porque son heurísticas sin garantía — exactamente el mismo tipo de "criterio
+  // sustituto no relacionado con el requisito real" que se eliminó en el punto 1.
+  // Inventar un orden falso acá sería peor que el bug original: haría que la misión
+  // se evalúe de forma "silenciosamente incorrecta" pero ahora con apariencia de
+  // estar arreglada.
+  //
+  // El método queda funcionalmente IGUAL al original (sigue asumiendo que
+  // `donacionesClient.buscarPorDonadorYFechaInicio` devuelve orden cronológico
+  // ascendente, sin garantía de contrato), pero:
+  //   1. Se loguea WARN cada vez que se evalúa esta misión, dejando explícito en
+  //      producción que el resultado depende de un orden no garantizado.
+  //   2. Queda documentado que el fix real requiere que el servicio de Donaciones
+  //      agregue un campo de fecha (p.ej. `fechaCreacion`) al DTO y lo propague — hay
+  //      que coordinarlo con el equipo que tiene ese servicio, no es algo que se
+  //      resuelva solo del lado de Incentivos.
   private boolean evaluarDonacionesAscendentes(List<DonacionDTO> donacionesAceptadas) {
+    String requestId = MDC.get("request_id");
     if (donacionesAceptadas.size() < 5) return false;
-    List<DonacionDTO> ultimasCinco = donacionesAceptadas.subList(donacionesAceptadas.size() - 5, donacionesAceptadas.size());
+
+    logger.warn("[{}] evaluarDonacionesAscendentes - evaluando sin garantia de orden cronologico: "
+            + "DonacionDTO no tiene campo de fecha, se asume que la lista ya viene ordenada "
+            + "ascendentemente por donacionesClient.buscarPorDonadorYFechaInicio. Pendiente: agregar "
+            + "campo de fecha al DTO en el servicio de Donaciones (ver punto 3 del review).",
+        requestId);
+
+    List<DonacionDTO> ultimasCinco =
+        donacionesAceptadas.subList(donacionesAceptadas.size() - 5, donacionesAceptadas.size());
     Integer anterior = null;
     for (DonacionDTO donacion : ultimasCinco) {
       if (donacion == null || donacion.cantidad() == null) return false;
@@ -409,5 +540,3 @@ public class Fachada implements FachadaIncentivos {
     // no-op: reemplazado por DonadoresYEntidadesClient
   }
 }
-
-

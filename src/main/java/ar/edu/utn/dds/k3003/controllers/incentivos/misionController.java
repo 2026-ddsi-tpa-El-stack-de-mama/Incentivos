@@ -155,14 +155,8 @@ public class misionController {
   @GetMapping("/donadores/{donadorID}/mision")
   public ResponseEntity<?> getMisionEnCursoDeDonador(@PathVariable("donadorID") String donadorID) {
     String requestId = MDC.get("request_id");
-    logger.info("[{}] GET /misiones/donadores/{}/mision - obtener mision en curso", requestId, donadorID);
     try {
       MisionDTO mision = fachada.getMisionEnCursoDeDonador(donadorID);
-      if (mision == null) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-            .header("X-Request-Id", requestId)
-            .body("El donador no tiene misión en curso");
-      }
       return ResponseEntity.ok().header("X-Request-Id", requestId).body(mision);
     } catch (NoSuchElementException ex) {
       metricas.errores404.increment();
@@ -187,6 +181,21 @@ public class misionController {
     } catch (RuntimeException ex) {
       metricas.errores400.increment();
       return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
+    } catch (Exception ex) {
+      metricas.errores500.increment();
+      return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).header("X-Request-Id", requestId).body(ex.getMessage());
+    }
+  }
+
+  @GetMapping("/donadores/{donadorID}/historial")
+  public ResponseEntity<?> historialMisiones(@PathVariable("donadorID") String donadorID) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] GET /misiones/donadores/{}/historial - obtener historial de misiones", requestId, donadorID);
+    try {
+      return ResponseEntity.ok().header("X-Request-Id", requestId).body(fachada.historialMisiones(donadorID));
+    } catch (NoSuchElementException ex) {
+      metricas.errores404.increment();
+      return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
     } catch (Exception ex) {
       metricas.errores500.increment();
       return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).header("X-Request-Id", requestId).body(ex.getMessage());
