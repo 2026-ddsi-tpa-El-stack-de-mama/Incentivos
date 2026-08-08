@@ -12,10 +12,10 @@ import java.util.List;
 @FeignClient(name = "donaciones", url = "${FACHADA_DONACIONES}")
 public interface DonacionesClient {
 
-  @GetMapping("/donaciones/search")
+  @GetMapping("/donaciones/search/{id}/{date}")
   List<DonacionDTO> buscarPorDonadorYFechaInicio(
-      @RequestParam String donadorID,
-      @RequestParam LocalDate fecha
+      @PathVariable("id") String donadorID,
+      @PathVariable("date") LocalDate fecha
   );
 
   @GetMapping("/productos/{id}")

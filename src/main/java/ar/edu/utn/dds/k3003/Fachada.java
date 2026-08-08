@@ -13,6 +13,7 @@ import ar.edu.utn.dds.k3003.clientes.DonacionesClient;
 import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
 import ar.edu.utn.dds.k3003.dtos.CambioCategoriaDTO;
 import ar.edu.utn.dds.k3003.dtos.MisionHistoricoDTO;
+import ar.edu.utn.dds.k3003.dtos.ResultadoProcesamiento;
 import ar.edu.utn.dds.k3003.model.incentivos.*;
 import ar.edu.utn.dds.k3003.repositories.incentivos.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -285,28 +286,24 @@ public class Fachada implements FachadaIncentivos {
   // amerita @Transactional a nivel de los pasos críticos únicamente (excluyendo las
   // llamadas HTTP) o un patrón de outbox/saga.
   @Override
-  public void procesarDonador(String donadorID) {
+  public ResultadoProcesamiento procesarDonador(String donadorID) {
     String requestId = MDC.get("request_id");
     donadoresYEntidadesClient.obtenerDonador(donadorID);
 
     UUID donadorUUID = UUID.fromString(donadorID);
     Optional<DonadorMision> misionActual = donadorMisionRepository.findByDonadorId(donadorUUID);
 
-    // Si no tiene misión activa, no hay nada que evaluar
     if (misionActual.isEmpty()) {
       logger.info("[{}] procesarDonador - donador {} sin mision activa", requestId, donadorID);
-      return;
+      return new ResultadoProcesamiento(
+          ResultadoProcesamiento.Estado.SIN_MISION_ACTIVA, null, false, false, null);
     }
 
     DonadorMision donadorMision = misionActual.get();
     Mision mision = donadorMision.getMision();
     LocalDate fechaAsignacion = donadorMision.getFechaAsignacion().toLocalDate();
 
-    // Punto 6: se deja propagar la excepción original (p.ej. NoSuchElementException
-    // -> 404) en vez de envolverla en un RuntimeException genérico que el controller
-    // traduciría como 400.
     List<DonacionDTO> donaciones = donacionesClient.buscarPorDonadorYFechaInicio(donadorID, fechaAsignacion);
-
     if (donaciones == null) donaciones = List.of();
 
     boolean completada = evaluarMision(mision, donaciones);
@@ -314,24 +311,27 @@ public class Fachada implements FachadaIncentivos {
     if (!completada) {
       logger.info("[{}] procesarDonador - donador {} no completo la mision {}",
           requestId, donadorID, mision.getId());
-      return;
+      return new ResultadoProcesamiento(
+          ResultadoProcesamiento.Estado.MISION_NO_COMPLETADA, mision.getId(), false, false, null);
     }
 
-    // Asignar insignia si corresponde (best-effort, ver nota de atomicidad arriba)
+    boolean insigniaAsignada = false;
     if (mision.getInsignia() != null) {
       try {
         asignarInsigniaADonador(donadorID, IncentivosMapper.toDto(mision.getInsignia()));
+        insigniaAsignada = true;
       } catch (RuntimeException e) {
         logger.warn("[{}] procesarDonador - fallo al asignar insignia a donador {}: {}",
             requestId, donadorID, e.getMessage(), e);
       }
     }
 
-    // Cambiar categoría si la misión define una categoría de fin (best-effort)
+    boolean categoriaActualizada = false;
     String categoriaFin = mision.getCategoriaFin();
     if (categoriaFin != null) {
       try {
         registrarCambioCategoriaEnDonador(donadorID, categoriaFin);
+        categoriaActualizada = true;
       } catch (RuntimeException e) {
         logger.warn("[{}] procesarDonador - fallo al cambiar categoria de donador {} a {}: {}",
             requestId, donadorID, categoriaFin, e.getMessage(), e);
@@ -371,10 +371,11 @@ public class Fachada implements FachadaIncentivos {
           requestId, donadorID, e.getMessage(), e);
     }
 
+    String siguienteMisionId = null;
     if (nuevaCategoria != null) {
       final String catBuscada = nuevaCategoria;
       Optional<Mision> siguienteMision = misionRepository.findAll().stream()
-          .filter(m -> !m.getId().equals(misionIdString))
+          .filter(m -> !m.getId().equals(mision.getId()))
           .filter(m -> catBuscada.equals(m.getCategoriaInicio()))
           .findFirst();
 
@@ -382,13 +383,17 @@ public class Fachada implements FachadaIncentivos {
         Mision nextMision = siguienteMision.get();
         donadorMisionRepository.save(new DonadorMision(donadorUUID, nextMision));
         misionHistoricoRepository.save(
-            new MisionHistorico(donadorUUID, nextMision, MisionHistorico.EstadoMision.ACTIVA)
-        );
+            new MisionHistorico(donadorUUID, nextMision, MisionHistorico.EstadoMision.ACTIVA));
+        siguienteMisionId = nextMision.getId();
       } else {
         logger.info("[{}] procesarDonador - no hay siguiente mision para la categoria {} (donador {})",
             requestId, catBuscada, donadorID);
       }
     }
+
+    return new ResultadoProcesamiento(
+        ResultadoProcesamiento.Estado.MISION_COMPLETADA, mision.getId(),
+        insigniaAsignada, categoriaActualizada, siguienteMisionId);
   }
 
   public List<MisionHistoricoDTO> historialMisiones(String donadorID) {

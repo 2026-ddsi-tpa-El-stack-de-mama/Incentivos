@@ -5,6 +5,7 @@ import ar.edu.utn.dds.k3003.Fachada;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.MisionDTO;
 import java.util.List;
 import java.util.NoSuchElementException;
+import ar.edu.utn.dds.k3003.dtos.ResultadoProcesamiento;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -172,9 +173,9 @@ public class misionController {
     String requestId = MDC.get("request_id");
     logger.info("[{}] POST /misiones/donadores/{}/procesar - procesar donador", requestId, donadorID);
     try {
-      fachada.procesarDonador(donadorID);
+      ResultadoProcesamiento resultado = fachada.procesarDonador(donadorID);
       metricas.donadoresProcesados.increment();
-      return ResponseEntity.ok().header("X-Request-Id", requestId).body("Donador procesado exitosamente");
+      return ResponseEntity.ok().header("X-Request-Id", requestId).body("Donador procesado: "+resultado);
     } catch (NoSuchElementException ex) {
       metricas.errores404.increment();
       return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
