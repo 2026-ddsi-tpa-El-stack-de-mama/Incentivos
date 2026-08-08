@@ -115,19 +115,32 @@ public class Fachada implements FachadaIncentivos {
 
   @Override
   public MisionDTO agregarMision(MisionDTO mision) {
-    if (mision == null) throw new RuntimeException("Mision nula");
+    if (mision == null) {
+      throw new IllegalArgumentException("Mision nula");
+    }
     if (mision.id() != null) {
       UUID uuid = UUID.fromString(mision.id());
-      if (misionRepository.existsById(uuid)) throw new RuntimeException("Mision ya existe");
+      if (misionRepository.existsById(uuid)) {
+        throw new IllegalStateException("Mision ya existe");
+      }
     }
+    if (mision.insigniaID() == null) {
+      throw new IllegalArgumentException("La mision debe tener una insignia asociada");
+    }
+
+    Insignia insignia = insigniaRepository.findById(UUID.fromString(mision.insigniaID()))
+        .orElseThrow(() -> new NoSuchElementException("Insignia inexistente: " + mision.insigniaID()));
+
     Mision ent = new Mision(
         mision.id(),
         mision.nombre(),
-        null,
+        null, // parámetro muerto, no lo usa el constructor — no confundir con la asociación real
         mision.categoriaInicio() != null ? mision.categoriaInicio().name() : null,
         mision.categoriaFin() != null ? mision.categoriaFin().name() : null,
         mision.tipo()
     );
+    ent.setInsignia(insignia); // esta es la única vía real de asociar la insignia
+
     Mision saved = misionRepository.save(ent);
     return IncentivosMapper.toDto(saved);
   }
