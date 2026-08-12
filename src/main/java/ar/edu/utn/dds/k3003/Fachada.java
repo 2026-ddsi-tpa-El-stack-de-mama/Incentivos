@@ -456,6 +456,23 @@ public class Fachada implements FachadaIncentivos {
         .findFirst();
   }
 
+  public List<MisionHistoricoDTO> historialMisiones(String donadorID) {
+    UUID donadorUUID = UUID.fromString(donadorID);
+    List<MisionHistorico> historial =
+        misionHistoricoRepository.findByDonadorIdOrderByFechaInicioDesc(donadorUUID);
+    if (historial.isEmpty()) {
+      throw new NoSuchElementException("El donador no tiene historial de misiones");
+    }
+    return historial.stream()
+        .map(h -> new MisionHistoricoDTO(
+            h.getMision().getId(),
+            h.getMision().getNombre(),
+            h.getEstado().name(),
+            h.getFechaInicio(),
+            h.getFechaFin()))
+        .collect(Collectors.toList());
+  }
+
   // Punto 4 del prompt — DECISIÓN DE NEGOCIO PENDIENTE DE CONFIRMAR CON EL EQUIPO:
   // El enunciado justifica el filtro por ACEPTADA textualmente solo para
   // DONACIONES_EXITOSAS ("recibidas correctamente... sin quejas"). Para las otras 3
@@ -473,7 +490,7 @@ public class Fachada implements FachadaIncentivos {
     TipoMisionEnum tipoMision = misionActual.getTipo();
     logger.info("tipo mision a evaluar: {}", tipoMision);
     if (tipoMision == null) tipoMision = inferirTipoPorNombre(misionActual.getNombre());
-
+    //todo: cambiar conqueja a aceptada y =>20
     List<DonacionDTO> aceptadas = filtrarPorEstado(donaciones, EstadoDonacionEnum.ACEPTADA);
 
     if (tipoMision == null) return contarDonacionesExitosas(aceptadas) >= 20;
