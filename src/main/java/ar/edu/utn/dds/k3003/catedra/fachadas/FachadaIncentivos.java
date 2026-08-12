@@ -18,7 +18,7 @@ public interface FachadaIncentivos {
 
   void asignarMisionADonador(String donadorID, MisionDTO misionDTO) throws NoSuchElementException;
 
-  void asignarInsigniaADonador(String donadorID, InsigniaDTO insigniaDTO)
+  boolean asignarInsigniaADonador(String donadorID, InsigniaDTO insigniaDTO)
       throws NoSuchElementException;
 
   ResultadoProcesamiento procesarDonador(String donadorID) throws NoSuchElementException;

@@ -9,6 +9,7 @@ import java.util.UUID;
 @Repository
 public interface DonadorInsigniaRepository extends JpaRepository<DonadorInsignia, Long> {
   List<DonadorInsignia> findByDonadorId(UUID donadorId);
+  boolean existsByDonadorIdAndInsigniaId(UUID donadorId, UUID insigniaId);
   void deleteByInsigniaId(UUID insigniaId);
 }
 

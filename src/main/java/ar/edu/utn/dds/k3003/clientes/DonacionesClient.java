@@ -15,7 +15,7 @@ public interface DonacionesClient {
   @GetMapping("/donaciones/search/{id}/{date}")
   List<DonacionDTO> buscarPorDonadorYFechaInicio(
       @PathVariable("id") String donadorID,
-      @PathVariable("date") LocalDate fecha
+      @PathVariable("date") String fecha
   );
 
   @GetMapping("/productos/{id}")
