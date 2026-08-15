@@ -11,7 +11,8 @@ public class MisionHistorico {
   public enum EstadoMision {
     ACTIVA,
     COMPLETADA,
-    CANCELADA
+    REGRESION,   // se habia completado, dejo de cumplir el umbral, se revirtio
+    CANCELADA    // estaba ACTIVA, se interrumpio por una regresion en otra mision
   }
 
   @Id

@@ -13,6 +13,9 @@ import java.util.List;
 @FeignClient(name = "donadoresYEntidades", url = "${FACHADA_DYE}")
 public interface DonadoresYEntidadesClient {
 
+  @GetMapping("/donadores")
+  List<DonadorDTO> obtenerDonadores();
+
   @GetMapping("/donadores/{id}")
   DonadorDTO obtenerDonador(@PathVariable String id);
 

@@ -11,5 +11,6 @@ public interface DonadorInsigniaRepository extends JpaRepository<DonadorInsignia
   List<DonadorInsignia> findByDonadorId(UUID donadorId);
   boolean existsByDonadorIdAndInsigniaId(UUID donadorId, UUID insigniaId);
   void deleteByInsigniaId(UUID insigniaId);
+  void deleteByDonadorIdAndInsigniaId(UUID donadorId, UUID insigniaId);
 }
 

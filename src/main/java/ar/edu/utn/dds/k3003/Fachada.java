@@ -610,6 +610,42 @@ public class Fachada implements FachadaIncentivos {
         .count();
   }
 
+  private void cancelarYReasignarMisionActiva(UUID donadorUUID, String donadorID, String categoriaPostReversion, String jobId) {
+    Optional<DonadorMision> misionActivaOpt = donadorMisionRepository.findByDonadorId(donadorUUID);
+
+    if (misionActivaOpt.isPresent()) {
+      DonadorMision misionActiva = misionActivaOpt.get();
+      Mision misionCancelada = misionActiva.getMision();
+
+      List<MisionHistorico> historial = misionHistoricoRepository.findByDonadorId(donadorUUID);
+      for (MisionHistorico hist : historial) {
+        if (hist.getEstado() == MisionHistorico.EstadoMision.ACTIVA
+            && hist.getMision().getId().equals(misionCancelada.getId())) {
+          hist.setEstado(MisionHistorico.EstadoMision.CANCELADA);
+          hist.setFechaFin(LocalDateTime.now());
+          misionHistoricoRepository.save(hist);
+          break;
+        }
+      }
+
+      donadorMisionRepository.deleteById(donadorUUID);
+      logger.info("[{}] cancelarYReasignarMisionActiva - donador {} - se cancelo mision activa {} por regresion",
+          jobId, donadorID, misionCancelada.getId());
+    }
+
+    Optional<Mision> misionParaAsignar = buscarMisionParaCategoria(categoriaPostReversion, null);
+    if (misionParaAsignar.isPresent()) {
+      Mision nueva = misionParaAsignar.get();
+      donadorMisionRepository.save(new DonadorMision(donadorUUID, nueva));
+      misionHistoricoRepository.save(new MisionHistorico(donadorUUID, nueva, MisionHistorico.EstadoMision.ACTIVA));
+      logger.info("[{}] cancelarYReasignarMisionActiva - donador {} - reasignado a mision {} (categoria {})",
+          jobId, donadorID, nueva.getId(), categoriaPostReversion);
+    } else {
+      logger.info("[{}] cancelarYReasignarMisionActiva - donador {} - sin mision disponible para categoria {} tras regresion",
+          jobId, donadorID, categoriaPostReversion);
+    }
+  }
+
   @Override
   public void setFachadaDonaciones(FachadaDonaciones fachadaDonaciones) {
     // no-op: reemplazado por DonacionesClient
