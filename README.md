@@ -12,8 +12,9 @@
 ---
 
 🧩 Link al despliegue en Render
--https://tp-dds-logistica-trias.onrender.com
--https://app.swaggerhub.com/apis/utn-893/api_tp_dds_logistica_trias/v1
+- https://entrega-2-cesartomasg.onrender.com
+
+- https://portal.swaggerhub.com/apis/utn-606/cesartomasG_Incentivos/1.0.0?source=catalog
 
 ---
 
