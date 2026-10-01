@@ -9,6 +9,7 @@ import ar.edu.utn.dds.k3003.model.incentivos.Mision;
 import ar.edu.utn.dds.k3003.model.incentivos.MisionHistorico;
 import ar.edu.utn.dds.k3003.repositories.incentivos.DonadorInsigniaRepository;
 import ar.edu.utn.dds.k3003.repositories.incentivos.MisionHistoricoRepository;
+import ar.edu.utn.dds.k3003.observabilidad.TraceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,7 +43,13 @@ public class RegresionMisionesJob {
   // Cada 5 minutos
   @Scheduled(fixedRate = 5 * 60 * 1000)
   public void revisarRegresiones() {
-    String jobId = UUID.randomUUID().toString().substring(0, 8);
+    try (TraceContext.Scope ignored = TraceContext.tarea()) {
+      ejecutarRevision();
+    }
+  }
+
+  private void ejecutarRevision() {
+    String jobId = TraceContext.traceId();
     logger.info("[{}] revisarRegresiones - inicio", jobId);
 
     List<MisionHistorico> completadas = misionHistoricoRepository

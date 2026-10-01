@@ -4,6 +4,7 @@ import ar.edu.utn.dds.k3003.Fachada;
 import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
 import ar.edu.utn.dds.k3003.model.incentivos.DonadorMision;
 import ar.edu.utn.dds.k3003.repositories.incentivos.DonadorMisionRepository;
+import ar.edu.utn.dds.k3003.observabilidad.TraceContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -34,7 +35,14 @@ public class ProcesarDonadoresJob {
   //5 min
   @Scheduled(fixedRate = 5 * 60 * 1000)
   public void procesarTodos() {
-    String jobId = UUID.randomUUID().toString().substring(0, 8);
+    // Sin request entrante: la ejecucion del job es el origen de la traza (o hereda la del que lo llama).
+    try (TraceContext.Scope ignored = TraceContext.tarea()) {
+      ejecutarProcesamiento();
+    }
+  }
+
+  private void ejecutarProcesamiento() {
+    String jobId = TraceContext.traceId();
 
     Set<UUID> todosLosDonadores = donadoresYEntidadesClient.obtenerDonadores().stream()
         .map(d -> UUID.fromString(d.id()))
