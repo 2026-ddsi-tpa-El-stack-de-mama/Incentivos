@@ -174,7 +174,7 @@ public class misionController {
     logger.info("[{}] POST /misiones/donadores/{}/procesar - procesar donador", requestId, donadorID);
     try {
       ResultadoProcesamiento resultado = fachada.procesarDonador(donadorID);
-      metricas.donadoresProcesados.increment();
+      // donadores.procesados se registra en Fachada.procesarDonador (cubre API y job)
       return ResponseEntity.ok().header("X-Request-Id", requestId).body("Donador procesado: "+resultado);
     } catch (NoSuchElementException ex) {
       metricas.errores404.increment();

@@ -1,6 +1,7 @@
 package ar.edu.utn.dds.k3003.jobs;
 
 import ar.edu.utn.dds.k3003.Fachada;
+import ar.edu.utn.dds.k3003.config.MetricasNegocio;
 import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
 import ar.edu.utn.dds.k3003.model.incentivos.DonadorMision;
 import ar.edu.utn.dds.k3003.repositories.incentivos.DonadorMisionRepository;
@@ -23,21 +24,32 @@ public class ProcesarDonadoresJob {
   private final Fachada fachada;
   private final DonadorMisionRepository donadorMisionRepository;
   private final DonadoresYEntidadesClient donadoresYEntidadesClient;
+  private final MetricasNegocio metricas;
 
   @Autowired
   public ProcesarDonadoresJob(Fachada fachada, DonadorMisionRepository donadorMisionRepository,
-                              DonadoresYEntidadesClient donadoresYEntidadesClient) {
+                              DonadoresYEntidadesClient donadoresYEntidadesClient,
+                              MetricasNegocio metricas) {
     this.fachada = fachada;
     this.donadorMisionRepository = donadorMisionRepository;
     this.donadoresYEntidadesClient = donadoresYEntidadesClient;
+    this.metricas = metricas;
   }
 
   //5 min
   @Scheduled(fixedRate = 5 * 60 * 1000)
   public void procesarTodos() {
     // Sin request entrante: la ejecucion del job es el origen de la traza (o hereda la del que lo llama).
+    long inicio = System.nanoTime();
+    String resultado = "ok";
     try (TraceContext.Scope ignored = TraceContext.tarea()) {
       ejecutarProcesamiento();
+    } catch (RuntimeException e) {
+      resultado = "error";
+      throw e;
+    } finally {
+      // Heartbeat del job: permite alarmar si deja de ejecutarse o si tarda de mas.
+      metricas.ejecucionJob("procesar_donadores", resultado, System.nanoTime() - inicio);
     }
   }
 

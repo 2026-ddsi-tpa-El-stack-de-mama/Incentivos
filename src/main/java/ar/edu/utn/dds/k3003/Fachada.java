@@ -1,6 +1,7 @@
 package ar.edu.utn.dds.k3003;
 
 import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.DonacionDTO;
+import ar.edu.utn.dds.k3003.config.MetricasNegocio;
 import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.EstadoDonacionEnum;
 import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.ProductoDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.donadoresYEntidades.DonadorDTO;
@@ -38,6 +39,8 @@ public class Fachada implements FachadaIncentivos {
   private DonadoresYEntidadesClient donadoresYEntidadesClient;
   private CambioCategoriaHistoricoRepository cambioCategoriaHistoricoRepository;
   private DonacionesClient donacionesClient;
+  // Puede ser null (constructor sin args usado por los tests de catedra): siempre con null-check
+  private MetricasNegocio metricas;
 
   private static final Logger logger = LoggerFactory.getLogger(Fachada.class);
 
@@ -52,7 +55,8 @@ public class Fachada implements FachadaIncentivos {
       MisionHistoricoRepository misionHistoricoRepository,
       DonadoresYEntidadesClient donadoresYEntidadesClient,
       CambioCategoriaHistoricoRepository cambioCategoriaHistoricoRepository,
-      DonacionesClient donacionesClient) {
+      DonacionesClient donacionesClient,
+      MetricasNegocio metricas) {
     this.insigniaRepository = insigniaRepository;
     this.misionRepository = misionRepository;
     this.donadorInsigniaRepository = donadorInsigniaRepository;
@@ -61,6 +65,7 @@ public class Fachada implements FachadaIncentivos {
     this.donadoresYEntidadesClient = donadoresYEntidadesClient;
     this.cambioCategoriaHistoricoRepository = cambioCategoriaHistoricoRepository;
     this.donacionesClient = donacionesClient;
+    this.metricas = metricas;
   }
 
   @Override
@@ -244,6 +249,9 @@ public class Fachada implements FachadaIncentivos {
     }
 
     donadorInsigniaRepository.save(new DonadorInsignia(donadorUUID, insignia));
+    // Unico punto de medicion: lo usan el endpoint y procesarDonador (job incluido).
+    // Solo cuenta asignaciones nuevas (si el donador ya la tenia, devuelve false mas arriba).
+    if (metricas != null) metricas.insigniasAsignadas.increment();
     return true;
   }
   public void registrarCambioCategoriaEnDonador(String donadorID, String nuevaCategoria) {
@@ -258,6 +266,7 @@ public class Fachada implements FachadaIncentivos {
     } catch (RuntimeException e) {
       logger.warn("No se pudo registrar historico de cambio de categoria para donador {}: {}", donadorID, e.getMessage(), e);
     }
+    if (metricas != null) metricas.categoriaCambiada(categoriaAnterior, nuevaCategoria, "progreso");
   }
 
   public List<CambioCategoriaDTO> historialCategorias(String donadorID) {
@@ -299,6 +308,35 @@ public class Fachada implements FachadaIncentivos {
   // llamadas HTTP) o un patrón de outbox/saga.
   @Override
   public ResultadoProcesamiento procesarDonador(String donadorID) {
+    // Punto unico de medicion: lo usan tanto el endpoint como ProcesarDonadoresJob.
+    ResultadoProcesamiento resultado;
+    try {
+      resultado = procesarDonadorInterno(donadorID);
+    } catch (RuntimeException e) {
+      if (metricas != null) metricas.donadoresProcesamientoFallido.increment();
+      throw e;
+    }
+    if (metricas != null) {
+      metricas.donadoresEvaluados.increment();
+      if (resultado.huboCambios()) metricas.donadoresProcesados.increment();
+      if (resultado.estado() == ResultadoProcesamiento.Estado.MISION_COMPLETADA) {
+        metricas.misionCompletada(tipoMisionDe(resultado.misionId()));
+      }
+    }
+    return resultado;
+  }
+
+  private String tipoMisionDe(String misionId) {
+    try {
+      return misionRepository.findById(UUID.fromString(misionId))
+          .map(m -> m.getTipo() != null ? m.getTipo().name() : null)
+          .orElse(null);
+    } catch (RuntimeException e) {
+      return null;
+    }
+  }
+
+  private ResultadoProcesamiento procesarDonadorInterno(String donadorID) {
     String requestId = MDC.get("request_id");
     logger.info("Consultando con donadores y entidades para obtener el donador");
     donadoresYEntidadesClient.obtenerDonador(donadorID);

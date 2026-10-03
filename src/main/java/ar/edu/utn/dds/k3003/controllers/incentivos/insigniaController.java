@@ -138,7 +138,7 @@ public class insigniaController {
     try {
       InsigniaDTO insigniaDTO = fachada.buscarInsigniaPorID(insigniaID);
       fachada.asignarInsigniaADonador(donadorID, insigniaDTO);
-      metricas.insigniasAsignadas.increment();
+      // insignias.asignadas se registra en Fachada.asignarInsigniaADonador (cubre API y procesarDonador)
       return ResponseEntity.status(HttpStatus.OK).header("X-Request-Id", requestId).body("Insignia asignada exitosamente");
     } catch (NoSuchElementException ex) {
       metricas.errores404.increment();

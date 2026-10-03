@@ -4,6 +4,7 @@ import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.DonacionDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.EstadoDonacionEnum;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.TipoMisionEnum;
 import ar.edu.utn.dds.k3003.clientes.DonacionesClient;
+import ar.edu.utn.dds.k3003.config.MetricasNegocio;
 import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
 import ar.edu.utn.dds.k3003.model.incentivos.Mision;
 import ar.edu.utn.dds.k3003.model.incentivos.MisionHistorico;
@@ -27,24 +28,34 @@ public class RegresionMisionesJob {
   private final DonacionesClient donacionesClient;
   private final DonadoresYEntidadesClient donadoresYEntidadesClient;
   private final DonadorInsigniaRepository donadorInsigniaRepository;
+  private final MetricasNegocio metricas;
 
   @Autowired
   public RegresionMisionesJob(
       MisionHistoricoRepository misionHistoricoRepository,
       DonacionesClient donacionesClient,
       DonadoresYEntidadesClient donadoresYEntidadesClient,
-      DonadorInsigniaRepository donadorInsigniaRepository) {
+      DonadorInsigniaRepository donadorInsigniaRepository,
+      MetricasNegocio metricas) {
     this.misionHistoricoRepository = misionHistoricoRepository;
     this.donacionesClient = donacionesClient;
     this.donadoresYEntidadesClient = donadoresYEntidadesClient;
     this.donadorInsigniaRepository = donadorInsigniaRepository;
+    this.metricas = metricas;
   }
 
   // Cada 5 minutos
   @Scheduled(fixedRate = 5 * 60 * 1000)
   public void revisarRegresiones() {
+    long inicio = System.nanoTime();
+    String resultado = "ok";
     try (TraceContext.Scope ignored = TraceContext.tarea()) {
       ejecutarRevision();
+    } catch (RuntimeException e) {
+      resultado = "error";
+      throw e;
+    } finally {
+      metricas.ejecucionJob("regresion_misiones", resultado, System.nanoTime() - inicio);
     }
   }
 
@@ -93,16 +104,19 @@ public class RegresionMisionesJob {
 
     hist.setEstado(MisionHistorico.EstadoMision.REGRESION);
     misionHistoricoRepository.save(hist);
+    metricas.misionesRegresiones.increment();
 
     if (mision.getInsignia() != null) {
       UUID insigniaUUID = UUID.fromString(mision.getInsignia().getId());
       donadorInsigniaRepository.deleteByDonadorIdAndInsigniaId(donadorUUID, insigniaUUID);
+      metricas.insigniasRevocadas.increment();
     }
 
     String categoriaInicio = mision.getCategoriaInicio();
     if (categoriaInicio != null) {
       try {
         donadoresYEntidadesClient.modificarCategoria(donadorID, categoriaInicio);
+        metricas.categoriaCambiada(mision.getCategoriaFin(), categoriaInicio, "regresion");
       } catch (RuntimeException e) {
         logger.warn("[{}] revisarRegresiones - fallo al degradar categoria de donador {} a {}: {}",
             jobId, donadorID, categoriaInicio, e.getMessage(), e);
