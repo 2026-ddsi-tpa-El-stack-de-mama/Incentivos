@@ -531,17 +531,17 @@ public class Fachada implements FachadaIncentivos {
     //todo: cambiar conqueja a aceptada y =>20
     List<DonacionDTO> aceptadas = filtrarPorEstado(donaciones, EstadoDonacionEnum.ACEPTADA);
 
-    if (tipoMision == null) return contarDonacionesExitosas(aceptadas) >= 20;
+    if (tipoMision == null) return contarDonacionesExitosas(aceptadas) >= 5;
 
     logger.info("Evaluando aceptadas: {}", aceptadas);
     return switch (tipoMision) {
-      case DONACIONES_EXITOSAS -> contarDonacionesExitosas(aceptadas) >= 20;
+      case DONACIONES_EXITOSAS -> contarDonacionesExitosas(aceptadas) >= 5;
       // TODO: confirmar con el equipo si corresponde ACEPTADA o todas las donaciones
       case COMPLETITUD -> evaluarCompletitud(aceptadas);
       // TODO: confirmar con el equipo si corresponde ACEPTADA o todas las donaciones
       case DONACIONES_ASCENDENTES -> evaluarDonacionesAscendentes(aceptadas);
       // TODO: confirmar con el equipo si corresponde ACEPTADA o todas las donaciones
-      case REVOLUCION_DONADORA -> contarDonacionesGrandes(aceptadas) > 10;
+      case REVOLUCION_DONADORA -> contarDonacionesGrandes(aceptadas) > 3;
     };
   }
 
