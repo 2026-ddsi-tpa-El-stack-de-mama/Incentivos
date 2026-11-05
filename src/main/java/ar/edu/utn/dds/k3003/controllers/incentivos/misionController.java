@@ -5,6 +5,7 @@ import ar.edu.utn.dds.k3003.Fachada;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.MisionDTO;
 import java.util.List;
 import java.util.NoSuchElementException;
+import ar.edu.utn.dds.k3003.dtos.ResultadoProcesamiento;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -155,14 +156,8 @@ public class misionController {
   @GetMapping("/donadores/{donadorID}/mision")
   public ResponseEntity<?> getMisionEnCursoDeDonador(@PathVariable("donadorID") String donadorID) {
     String requestId = MDC.get("request_id");
-    logger.info("[{}] GET /misiones/donadores/{}/mision - obtener mision en curso", requestId, donadorID);
     try {
       MisionDTO mision = fachada.getMisionEnCursoDeDonador(donadorID);
-      if (mision == null) {
-        return ResponseEntity.status(HttpStatus.NOT_FOUND)
-            .header("X-Request-Id", requestId)
-            .body("El donador no tiene misión en curso");
-      }
       return ResponseEntity.ok().header("X-Request-Id", requestId).body(mision);
     } catch (NoSuchElementException ex) {
       metricas.errores404.increment();
@@ -178,15 +173,30 @@ public class misionController {
     String requestId = MDC.get("request_id");
     logger.info("[{}] POST /misiones/donadores/{}/procesar - procesar donador", requestId, donadorID);
     try {
-      fachada.procesarDonador(donadorID);
-      metricas.donadoresProcesados.increment();
-      return ResponseEntity.ok().header("X-Request-Id", requestId).body("Donador procesado exitosamente");
+      ResultadoProcesamiento resultado = fachada.procesarDonador(donadorID);
+      // donadores.procesados se registra en Fachada.procesarDonador (cubre API y job)
+      return ResponseEntity.ok().header("X-Request-Id", requestId).body("Donador procesado: "+resultado);
     } catch (NoSuchElementException ex) {
       metricas.errores404.increment();
       return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
     } catch (RuntimeException ex) {
       metricas.errores400.increment();
       return ResponseEntity.status(HttpStatus.BAD_REQUEST).header("X-Request-Id", requestId).body(ex.getMessage());
+    } catch (Exception ex) {
+      metricas.errores500.increment();
+      return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).header("X-Request-Id", requestId).body(ex.getMessage());
+    }
+  }
+
+  @GetMapping("/donadores/{donadorID}/historial")
+  public ResponseEntity<?> historialMisiones(@PathVariable("donadorID") String donadorID) {
+    String requestId = MDC.get("request_id");
+    logger.info("[{}] GET /misiones/donadores/{}/historial - obtener historial de misiones", requestId, donadorID);
+    try {
+      return ResponseEntity.ok().header("X-Request-Id", requestId).body(fachada.historialMisiones(donadorID));
+    } catch (NoSuchElementException ex) {
+      metricas.errores404.increment();
+      return ResponseEntity.status(HttpStatus.NOT_FOUND).header("X-Request-Id", requestId).body(ex.getMessage());
     } catch (Exception ex) {
       metricas.errores500.increment();
       return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).header("X-Request-Id", requestId).body(ex.getMessage());

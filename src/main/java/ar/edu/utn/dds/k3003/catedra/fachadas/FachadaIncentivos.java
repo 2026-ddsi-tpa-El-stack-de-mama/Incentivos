@@ -2,6 +2,7 @@ package ar.edu.utn.dds.k3003.catedra.fachadas;
 
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.InsigniaDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.MisionDTO;
+import ar.edu.utn.dds.k3003.dtos.ResultadoProcesamiento;
 import java.util.List;
 import java.util.NoSuchElementException;
 
@@ -17,10 +18,10 @@ public interface FachadaIncentivos {
 
   void asignarMisionADonador(String donadorID, MisionDTO misionDTO) throws NoSuchElementException;
 
-  void asignarInsigniaADonador(String donadorID, InsigniaDTO insigniaDTO)
+  boolean asignarInsigniaADonador(String donadorID, InsigniaDTO insigniaDTO)
       throws NoSuchElementException;
 
-  void procesarDonador(String donadorID) throws NoSuchElementException;
+  ResultadoProcesamiento procesarDonador(String donadorID) throws NoSuchElementException;
 
   void setFachadaDonaciones(FachadaDonaciones fachadaDonaciones);
 

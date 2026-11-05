@@ -1,35 +1,40 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<configuration scan="true">
+<!--
+  Adaptado del ejemplo de la catedra (logs-demo-service). Diferencias:
+  - Se elimina el appender de archivo: en Render el disco es efimero y ya se ve la consola.
+  - Se quita %method:%line (obliga a Logback a calcular el caller en cada linea).
+  - El nombre del componente sale de APP_NAME (por defecto "incentivos").
+  Lo demas (condicion por BETTERSTACK_SOURCE_TOKEN, dos bloques <root>) es identico al demo.
+  Nota: <if condition> esta deprecado desde Logback 1.5.20 y tira un warning al arrancar; el
+  ejemplo de la catedra lo documenta y sigue funcionando.
+-->
+<configuration>
 
-  <property name="LOG_PATH" value="logs" />
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %-5level [${APP_NAME:-incentivos}] [trace=%X{traceId} req=%X{requestId}] [%thread] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
 
-  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-	<encoder>
-	  <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%file:%line] - %msg %n</pattern>
-	</encoder>
-  </appender>
-
-  <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
-	<file>${LOG_PATH}/incentivos.log</file>
-	<rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
-	  <fileNamePattern>${LOG_PATH}/incentivos.%d{yyyy-MM-dd}.%i.log</fileNamePattern>
-	  <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
-		<maxFileSize>10MB</maxFileSize>
-	  </timeBasedFileNamingAndTriggeringPolicy>
-	  <maxHistory>30</maxHistory>
-	  <totalSizeCap>1GB</totalSizeCap>
-	</rollingPolicy>
-	<encoder>
-	  <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%file:%line] - [%X{request_id}] %msg %n</pattern>
-	  <charset>utf8</charset>
-	</encoder>
-  </appender>
-
-  <root level="INFO">
-	<appender-ref ref="CONSOLE" />
-	<appender-ref ref="FILE" />
-  </root>
+    <if condition='isDefined("BETTERSTACK_SOURCE_TOKEN")'>
+        <then>
+            <appender name="BETTERSTACK" class="com.logtail.logback.LogtailAppender">
+                <appName>${APP_NAME:-incentivos}</appName>
+                <sourceToken>${BETTERSTACK_SOURCE_TOKEN}</sourceToken>
+                <ingestUrl>${BETTERSTACK_INGEST_URL:-https://in.logs.betterstack.com}</ingestUrl>
+                <mdcFields>traceId,instanceId,requestId</mdcFields>
+                <mdcTypes>string,string,string</mdcTypes>
+            </appender>
+            <root level="INFO">
+                <appender-ref ref="CONSOLE"/>
+                <appender-ref ref="BETTERSTACK"/>
+            </root>
+        </then>
+        <else>
+            <root level="INFO">
+                <appender-ref ref="CONSOLE"/>
+            </root>
+        </else>
+    </if>
 
 </configuration>
-
-
