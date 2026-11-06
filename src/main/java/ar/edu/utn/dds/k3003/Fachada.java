@@ -15,6 +15,9 @@ import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
 import ar.edu.utn.dds.k3003.dtos.CambioCategoriaDTO;
 import ar.edu.utn.dds.k3003.dtos.MisionHistoricoDTO;
 import ar.edu.utn.dds.k3003.dtos.ResultadoProcesamiento;
+import ar.edu.utn.dds.k3003.eventos.Evento;
+import ar.edu.utn.dds.k3003.eventos.PublicadorEventos;
+import ar.edu.utn.dds.k3003.eventos.TipoEvento;
 import ar.edu.utn.dds.k3003.model.incentivos.*;
 import ar.edu.utn.dds.k3003.repositories.incentivos.*;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -41,6 +44,8 @@ public class Fachada implements FachadaIncentivos {
   private DonacionesClient donacionesClient;
   // Puede ser null (constructor sin args usado por los tests de catedra): siempre con null-check
   private MetricasNegocio metricas;
+  // Igual que metricas: puede ser null con el constructor sin args, publicar solo via publicar()
+  private PublicadorEventos eventos;
 
   private static final Logger logger = LoggerFactory.getLogger(Fachada.class);
 
@@ -56,7 +61,8 @@ public class Fachada implements FachadaIncentivos {
       DonadoresYEntidadesClient donadoresYEntidadesClient,
       CambioCategoriaHistoricoRepository cambioCategoriaHistoricoRepository,
       DonacionesClient donacionesClient,
-      MetricasNegocio metricas) {
+      MetricasNegocio metricas,
+      PublicadorEventos eventos) {
     this.insigniaRepository = insigniaRepository;
     this.misionRepository = misionRepository;
     this.donadorInsigniaRepository = donadorInsigniaRepository;
@@ -66,6 +72,11 @@ public class Fachada implements FachadaIncentivos {
     this.cambioCategoriaHistoricoRepository = cambioCategoriaHistoricoRepository;
     this.donacionesClient = donacionesClient;
     this.metricas = metricas;
+    this.eventos = eventos;
+  }
+
+  private void publicar(Evento evento) {
+    if (eventos != null) eventos.publicar(evento);
   }
 
   @Override
@@ -87,6 +98,7 @@ public class Fachada implements FachadaIncentivos {
     Insignia saved = insigniaRepository.save(ent);
     InsigniaDTO dto = IncentivosMapper.toDto(saved);
     logger.info("[{}] Fachada.agregarInsignia - salida: id={}", requestId, dto.id());
+    publicar(Evento.insignia(TipoEvento.INSIGNIA_CREADA, dto));
     return dto;
   }
 
@@ -97,7 +109,9 @@ public class Fachada implements FachadaIncentivos {
     if (!insigniaRepository.existsById(uuid)) throw new RuntimeException("Insignia inexistente");
     Insignia ent = new Insignia(insignia.id(), insignia.nombre(), insignia.descripcion());
     Insignia saved = insigniaRepository.save(ent);
-    return IncentivosMapper.toDto(saved);
+    InsigniaDTO dto = IncentivosMapper.toDto(saved);
+    publicar(Evento.insignia(TipoEvento.INSIGNIA_MODIFICADA, dto));
+    return dto;
   }
 
   public void eliminarInsignia(String insigniaID) {
@@ -106,6 +120,7 @@ public class Fachada implements FachadaIncentivos {
     if (!insigniaRepository.existsById(uuid)) throw new RuntimeException("Insignia inexistente");
     donadorInsigniaRepository.deleteByInsigniaId(uuid);
     insigniaRepository.deleteById(uuid);
+    publicar(Evento.eliminacion(TipoEvento.INSIGNIA_ELIMINADA, insigniaID));
   }
 
   public List<InsigniaDTO> listarInsignias() {
@@ -148,7 +163,9 @@ public class Fachada implements FachadaIncentivos {
     ent.setInsignia(insignia); // esta es la única vía real de asociar la insignia
 
     Mision saved = misionRepository.save(ent);
-    return IncentivosMapper.toDto(saved);
+    MisionDTO dto = IncentivosMapper.toDto(saved);
+    publicar(Evento.mision(TipoEvento.MISION_CREADA, dto));
+    return dto;
   }
 
   public MisionDTO modificarMision(MisionDTO mision) {
@@ -164,7 +181,9 @@ public class Fachada implements FachadaIncentivos {
         mision.tipo()
     );
     Mision saved = misionRepository.save(ent);
-    return IncentivosMapper.toDto(saved);
+    MisionDTO dto = IncentivosMapper.toDto(saved);
+    publicar(Evento.mision(TipoEvento.MISION_MODIFICADA, dto));
+    return dto;
   }
 
   public void eliminarMision(String misionID) {
@@ -173,6 +192,7 @@ public class Fachada implements FachadaIncentivos {
     if (!misionRepository.existsById(uuid)) throw new RuntimeException("Mision inexistente");
     donadorMisionRepository.deleteByMisionId(uuid);
     misionRepository.deleteById(uuid);
+    publicar(Evento.eliminacion(TipoEvento.MISION_ELIMINADA, misionID));
   }
 
   public List<MisionDTO> listarMisiones() {
@@ -221,7 +241,8 @@ public class Fachada implements FachadaIncentivos {
     DonadorMision dm = new DonadorMision(donadorUUID, mision);
     donadorMisionRepository.save(dm);
     MisionHistorico historico = new MisionHistorico(donadorUUID, mision, MisionHistorico.EstadoMision.ACTIVA);
-    misionHistoricoRepository.save(historico);
+    historico = misionHistoricoRepository.save(historico);
+    publicar(Evento.misionDeDonador(TipoEvento.MISION_ASIGNADA, historico));
   }
 
   @Override
@@ -252,6 +273,7 @@ public class Fachada implements FachadaIncentivos {
     // Unico punto de medicion: lo usan el endpoint y procesarDonador (job incluido).
     // Solo cuenta asignaciones nuevas (si el donador ya la tenia, devuelve false mas arriba).
     if (metricas != null) metricas.insigniasAsignadas.increment();
+    publicar(Evento.insigniaDeDonador(TipoEvento.INSIGNIA_ASIGNADA, donadorUUID, insignia));
     return true;
   }
   public void registrarCambioCategoriaEnDonador(String donadorID, String nuevaCategoria) {
@@ -267,6 +289,7 @@ public class Fachada implements FachadaIncentivos {
       logger.warn("No se pudo registrar historico de cambio de categoria para donador {}: {}", donadorID, e.getMessage(), e);
     }
     if (metricas != null) metricas.categoriaCambiada(categoriaAnterior, nuevaCategoria, "progreso");
+    publicar(Evento.categoriaCambiada(donadorID, categoriaAnterior, nuevaCategoria, Evento.MOTIVO_PROGRESO));
   }
 
   public List<CambioCategoriaDTO> historialCategorias(String donadorID) {
@@ -373,8 +396,9 @@ public class Fachada implements FachadaIncentivos {
         if (misionParaAsignar.isPresent()) {
           Mision nuevaMision = misionParaAsignar.get();
           donadorMisionRepository.save(new DonadorMision(donadorUUID, nuevaMision));
-          misionHistoricoRepository.save(
+          MisionHistorico historico = misionHistoricoRepository.save(
               new MisionHistorico(donadorUUID, nuevaMision, MisionHistorico.EstadoMision.ACTIVA));
+          publicar(Evento.misionDeDonador(TipoEvento.MISION_ASIGNADA, historico));
           misionAsignadaId = nuevaMision.getId();
           logger.info("[{}] procesarDonador - donador {} sin mision activa, se le asigno la mision {}",
               requestId, donadorID, misionAsignadaId);
@@ -439,6 +463,7 @@ public class Fachada implements FachadaIncentivos {
         hist.setEstado(MisionHistorico.EstadoMision.COMPLETADA);
         hist.setFechaFin(LocalDateTime.now());
         misionHistoricoRepository.save(hist);
+        publicar(Evento.misionDeDonador(TipoEvento.MISION_COMPLETADA, hist));
         historicoMarcado = true;
         break;
       }
@@ -468,8 +493,9 @@ public class Fachada implements FachadaIncentivos {
       if (siguienteMision.isPresent()) {
         Mision nextMision = siguienteMision.get();
         donadorMisionRepository.save(new DonadorMision(donadorUUID, nextMision));
-        misionHistoricoRepository.save(
+        MisionHistorico historicoSiguiente = misionHistoricoRepository.save(
             new MisionHistorico(donadorUUID, nextMision, MisionHistorico.EstadoMision.ACTIVA));
+        publicar(Evento.misionDeDonador(TipoEvento.MISION_ASIGNADA, historicoSiguiente));
         siguienteMisionId = nextMision.getId();
       } else {
         logger.info("[{}] procesarDonador - no hay siguiente mision para la categoria {} (donador {})",

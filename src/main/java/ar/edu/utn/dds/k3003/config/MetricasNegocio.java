@@ -83,6 +83,11 @@ public class MetricasNegocio {
         "desde", valorTag(desde), "hacia", valorTag(hacia), "motivo", motivo).increment();
   }
 
+  /** Intento de publicar un evento en la cola. resultado: "ok" o "error". */
+  public void eventoPublicado(String tipo, String resultado) {
+    registry.counter("eventos.publicados", "tipo", valorTag(tipo), "resultado", resultado).increment();
+  }
+
   /** Registra una ejecucion de job (heartbeat) y su duracion. resultado: "ok" o "error". */
   public void ejecucionJob(String job, String resultado, long nanos) {
     registry.counter("jobs.ejecuciones", "job", job, "resultado", resultado).increment();
