@@ -3,7 +3,6 @@ package ar.edu.utn.dds.k3003.eventos;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.AdditionalAnswers.returnsFirstArg;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -31,12 +30,14 @@ import ar.edu.utn.dds.k3003.model.incentivos.DonadorMision;
 import ar.edu.utn.dds.k3003.model.incentivos.Insignia;
 import ar.edu.utn.dds.k3003.model.incentivos.Mision;
 import ar.edu.utn.dds.k3003.model.incentivos.MisionHistorico;
+import ar.edu.utn.dds.k3003.queue.EventoQueue;
 import ar.edu.utn.dds.k3003.repositories.incentivos.CambioCategoriaHistoricoRepository;
 import ar.edu.utn.dds.k3003.repositories.incentivos.DonadorInsigniaRepository;
 import ar.edu.utn.dds.k3003.repositories.incentivos.DonadorMisionRepository;
 import ar.edu.utn.dds.k3003.repositories.incentivos.InsigniaRepository;
 import ar.edu.utn.dds.k3003.repositories.incentivos.MisionHistoricoRepository;
 import ar.edu.utn.dds.k3003.repositories.incentivos.MisionRepository;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.util.ArrayList;
 import java.util.List;
@@ -67,7 +68,7 @@ class EventosDeNegocioTest {
   @Mock DonadoresYEntidadesClient donadoresClient;
   @Mock DonacionesClient donacionesClient;
   @Mock PublicadorEventos eventos;
-  @Captor ArgumentCaptor<Evento> publicados;
+  @Captor ArgumentCaptor<EventoQueue> publicados;
 
   private final MetricasNegocio metricas = new MetricasNegocio(new SimpleMeterRegistry());
   private Fachada fachada;
@@ -111,12 +112,16 @@ class EventosDeNegocioTest {
         .toList());
   }
 
-  private List<TipoEvento> tiposPublicados(int cantidad) {
-    verify(eventos, times(cantidad)).publicar(publicados.capture());
-    return publicados.getAllValues().stream().map(Evento::tipo).toList();
+  private static AccionEvento accion(EventoQueue evento) {
+    return AccionEvento.valueOf(new ObjectMapper().valueToTree(evento.descripcion()).get("accion").asText());
   }
 
-  private Evento unicoEvento() {
+  private List<AccionEvento> tiposPublicados(int cantidad) {
+    verify(eventos, times(cantidad)).publicar(publicados.capture());
+    return publicados.getAllValues().stream().map(EventosDeNegocioTest::accion).toList();
+  }
+
+  private EventoQueue unicoEvento() {
     verify(eventos).publicar(publicados.capture());
     return publicados.getValue();
   }
@@ -138,8 +143,8 @@ class EventosDeNegocioTest {
     fachada.eliminarMision(mision.getId());
 
     assertEquals(List.of(
-        TipoEvento.INSIGNIA_CREADA, TipoEvento.INSIGNIA_MODIFICADA, TipoEvento.INSIGNIA_ELIMINADA,
-        TipoEvento.MISION_CREADA, TipoEvento.MISION_MODIFICADA, TipoEvento.MISION_ELIMINADA),
+        AccionEvento.INSIGNIA_CREADA, AccionEvento.INSIGNIA_MODIFICADA, AccionEvento.INSIGNIA_ELIMINADA,
+        AccionEvento.MISION_CREADA, AccionEvento.MISION_MODIFICADA, AccionEvento.MISION_ELIMINADA),
         tiposPublicados(6));
   }
 
@@ -159,10 +164,12 @@ class EventosDeNegocioTest {
 
     fachada.asignarMisionADonador(DONADOR_ID, new MisionDTO(mision.getId(), null, null, null, null, null));
 
-    Evento evento = unicoEvento();
-    assertEquals(TipoEvento.MISION_ASIGNADA, evento.tipo());
-    assertEquals(DONADOR_ID, evento.entidadId());
-    Evento.MisionDeDonador payload = (Evento.MisionDeDonador) evento.payload();
+    EventoQueue evento = unicoEvento();
+    assertEquals("MisionDonadorEvento", evento.tipoEvento());
+    MisionDonadorEvento payload = (MisionDonadorEvento) evento.descripcion();
+    assertEquals("MISION_ASIGNADA", payload.accion());
+    assertEquals(DONADOR_ID, payload.donadorId());
+    assertEquals(CategoriaDonadorEnum.COLABORADOR, payload.categoriaFin());
     assertEquals(77L, payload.historicoId());
     assertEquals("ACTIVA", payload.estado());
     assertEquals(mision.getId(), payload.misionId());
@@ -188,7 +195,7 @@ class EventosDeNegocioTest {
 
     fachada.procesarDonador(DONADOR_ID);
 
-    assertEquals(TipoEvento.MISION_ASIGNADA, unicoEvento().tipo());
+    assertEquals(AccionEvento.MISION_ASIGNADA, accion(unicoEvento()));
   }
 
   @Test
@@ -208,19 +215,19 @@ class EventosDeNegocioTest {
     fachada.procesarDonador(DONADOR_ID);
 
     assertEquals(List.of(
-        TipoEvento.INSIGNIA_ASIGNADA, TipoEvento.CATEGORIA_CAMBIADA,
-        TipoEvento.MISION_COMPLETADA, TipoEvento.MISION_ASIGNADA), tiposPublicados(4));
+        AccionEvento.INSIGNIA_ASIGNADA, AccionEvento.CATEGORIA_CAMBIADA,
+        AccionEvento.MISION_COMPLETADA, AccionEvento.MISION_ASIGNADA), tiposPublicados(4));
 
-    List<Evento> todos = publicados.getAllValues();
-    var categoria = (Evento.CategoriaDeDonador) todos.get(1).payload();
+    List<EventoQueue> todos = publicados.getAllValues();
+    var categoria = (CategoriaDonadorEvento) todos.get(1).descripcion();
     assertEquals("OCASIONAL", categoria.categoriaAnterior());
     assertEquals("COLABORADOR", categoria.categoriaNueva());
     assertEquals(Evento.MOTIVO_PROGRESO, categoria.motivo());
-    var completada = (Evento.MisionDeDonador) todos.get(2).payload();
+    var completada = (MisionDonadorEvento) todos.get(2).descripcion();
     assertEquals(5L, completada.historicoId());
     assertEquals("COMPLETADA", completada.estado());
     assertNotNull(completada.fechaFin());
-    assertEquals(siguiente.getId(), ((Evento.MisionDeDonador) todos.get(3).payload()).misionId());
+    assertEquals(siguiente.getId(), ((MisionDonadorEvento) todos.get(3).descripcion()).misionId());
   }
 
   @Test
@@ -260,15 +267,15 @@ class EventosDeNegocioTest {
         donadorInsigniaRepository, metricas, eventos).revisarRegresiones();
 
     assertEquals(List.of(
-        TipoEvento.MISION_REVERTIDA, TipoEvento.INSIGNIA_REVOCADA, TipoEvento.CATEGORIA_CAMBIADA),
+        AccionEvento.MISION_REVERTIDA, AccionEvento.INSIGNIA_REVOCADA, AccionEvento.CATEGORIA_CAMBIADA),
         tiposPublicados(3));
-    List<Evento> todos = publicados.getAllValues();
-    assertEquals("REGRESION", ((Evento.MisionDeDonador) todos.get(0).payload()).estado());
-    assertEquals(insignia.getId(), ((Evento.InsigniaDeDonador) todos.get(1).payload()).insigniaId());
-    var categoria = (Evento.CategoriaDeDonador) todos.get(2).payload();
+    List<EventoQueue> todos = publicados.getAllValues();
+    assertEquals("REGRESION", ((MisionDonadorEvento) todos.get(0).descripcion()).estado());
+    assertEquals(insignia.getId(), ((InsigniaDonadorEvento) todos.get(1).descripcion()).insigniaId());
+    var categoria = (CategoriaDonadorEvento) todos.get(2).descripcion();
     assertEquals("OCASIONAL", categoria.categoriaNueva());
     assertEquals(Evento.MOTIVO_REGRESION, categoria.motivo());
-    assertTrue(todos.stream().allMatch(e -> e.entidadId().equals(DONADOR_ID)));
+    assertEquals(DONADOR_ID, categoria.donadorId());
   }
 
   private static final class IncentivosDto {

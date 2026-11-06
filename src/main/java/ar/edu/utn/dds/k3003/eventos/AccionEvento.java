@@ -1,7 +1,7 @@
 package ar.edu.utn.dds.k3003.eventos;
 
-/** Cambios de estado de Incentivos. Contrato completo en docs/eventos_incentivos.md. */
-public enum TipoEvento {
+/** Lo que paso, dentro de cada DTO de evento. Contrato completo en docs/eventos_incentivos.md. */
+public enum AccionEvento {
   INSIGNIA_CREADA,
   INSIGNIA_MODIFICADA,
   INSIGNIA_ELIMINADA,

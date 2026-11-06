@@ -2,6 +2,7 @@ package ar.edu.utn.dds.k3003.eventos;
 
 import ar.edu.utn.dds.k3003.config.MetricasNegocio;
 import ar.edu.utn.dds.k3003.observabilidad.TraceContext;
+import ar.edu.utn.dds.k3003.queue.EventoQueue;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -53,31 +54,31 @@ public class PublicadorEventos {
     }
   }
 
-  public void publicar(Evento evento) {
+  public void publicar(EventoQueue evento) {
     if (!habilitado) {
-      logger.debug("Evento {} descartado: publicacion deshabilitada", evento.tipo());
+      logger.debug("Evento {} descartado: publicacion deshabilitada", evento.tipoEvento());
       return;
     }
     try {
       rabbitTemplate.send(EXCHANGE_POR_DEFECTO, cola, aMensaje(evento));
-      metricas.eventoPublicado(evento.tipo().name(), "ok");
-      logger.info("Evento publicado: tipo={} eventoId={} entidadId={}",
-          evento.tipo(), evento.eventoId(), evento.entidadId());
+      metricas.eventoPublicado(evento.tipoEvento(), "ok");
+      logger.info("Evento publicado: tipo={} id={}", evento.tipoEvento(), evento.id());
     } catch (JsonProcessingException | RuntimeException e) {
-      metricas.eventoPublicado(evento.tipo().name(), "error");
-      logger.warn("No se pudo publicar evento: tipo={} eventoId={} entidadId={}: {}",
-          evento.tipo(), evento.eventoId(), evento.entidadId(), e.getMessage(), e);
+      metricas.eventoPublicado(evento.tipoEvento(), "error");
+      logger.warn("No se pudo publicar evento: tipo={} id={}: {}",
+          evento.tipoEvento(), evento.id(), e.getMessage(), e);
     }
   }
 
-  private Message aMensaje(Evento evento) throws JsonProcessingException {
+  private Message aMensaje(EventoQueue evento) throws JsonProcessingException {
     MessageBuilderSupport<Message> mensaje = MessageBuilder.withBody(objectMapper.writeValueAsBytes(evento))
         .setContentType(MessageProperties.CONTENT_TYPE_JSON)
         .setContentEncoding("UTF-8")
-        .setMessageId(evento.eventoId())
-        .setType(evento.tipo().name());
-    if (evento.traceId() != null) {
-      mensaje.setHeader(TraceContext.TRACE_HEADER, evento.traceId());
+        .setMessageId(evento.id())
+        .setType(evento.tipoEvento());
+    String traceId = TraceContext.traceId();
+    if (traceId != null) {
+      mensaje.setHeader(TraceContext.TRACE_HEADER, traceId);
     }
     return mensaje.build();
   }

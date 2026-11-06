@@ -6,9 +6,9 @@ import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.TipoMisionEnum;
 import ar.edu.utn.dds.k3003.clientes.DonacionesClient;
 import ar.edu.utn.dds.k3003.config.MetricasNegocio;
 import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
+import ar.edu.utn.dds.k3003.eventos.AccionEvento;
 import ar.edu.utn.dds.k3003.eventos.Evento;
 import ar.edu.utn.dds.k3003.eventos.PublicadorEventos;
-import ar.edu.utn.dds.k3003.eventos.TipoEvento;
 import ar.edu.utn.dds.k3003.model.incentivos.Mision;
 import ar.edu.utn.dds.k3003.model.incentivos.MisionHistorico;
 import ar.edu.utn.dds.k3003.repositories.incentivos.DonadorInsigniaRepository;
@@ -111,13 +111,13 @@ public class RegresionMisionesJob {
     hist.setEstado(MisionHistorico.EstadoMision.REGRESION);
     misionHistoricoRepository.save(hist);
     metricas.misionesRegresiones.increment();
-    eventos.publicar(Evento.misionDeDonador(TipoEvento.MISION_REVERTIDA, hist));
+    eventos.publicar(Evento.misionDeDonador(AccionEvento.MISION_REVERTIDA, hist));
 
     if (mision.getInsignia() != null) {
       UUID insigniaUUID = UUID.fromString(mision.getInsignia().getId());
       donadorInsigniaRepository.deleteByDonadorIdAndInsigniaId(donadorUUID, insigniaUUID);
       metricas.insigniasRevocadas.increment();
-      eventos.publicar(Evento.insigniaDeDonador(TipoEvento.INSIGNIA_REVOCADA, donadorUUID, mision.getInsignia()));
+      eventos.publicar(Evento.insigniaDeDonador(AccionEvento.INSIGNIA_REVOCADA, donadorUUID, mision.getInsignia()));
     }
 
     String categoriaInicio = mision.getCategoriaInicio();
