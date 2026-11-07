@@ -101,6 +101,16 @@ public class Fachada implements FachadaIncentivos {
     }
   }
 
+  // Los datos de la ficha que no son de Incentivos los publica Donadores y Entidades. Si falla, la
+  // mision ya quedo asignada y la ficha se completa con el proximo evento del donador.
+  private void pedirEventoDeDonador(String donadorID) {
+    try {
+      donadoresYEntidadesClient.publicarDonador(donadorID);
+    } catch (RuntimeException e) {
+      logger.warn("No se pudo pedir el evento del donador {}: {}", donadorID, e.getMessage(), e);
+    }
+  }
+
   // Un cambio de catalogo modifica la foto de todos los donadores que tienen esa insignia o mision.
   private void publicarMisionInsigniaDeDonadores(Collection<UUID> donadores) {
     donadores.forEach(this::publicarMisionInsigniaDeDonador);
@@ -335,6 +345,7 @@ public class Fachada implements FachadaIncentivos {
     MisionHistorico historico = new MisionHistorico(donadorUUID, mision, MisionHistorico.EstadoMision.ACTIVA);
     misionHistoricoRepository.save(historico);
     publicarMisionInsigniaDeDonador(donadorUUID);
+    pedirEventoDeDonador(donadorID);
   }
 
   @Override
@@ -492,6 +503,7 @@ public class Fachada implements FachadaIncentivos {
           misionHistoricoRepository.save(
               new MisionHistorico(donadorUUID, nuevaMision, MisionHistorico.EstadoMision.ACTIVA));
           publicarMisionInsigniaDeDonador(donadorUUID);
+          pedirEventoDeDonador(donadorID);
           misionAsignadaId = nuevaMision.getId();
           logger.info("[{}] procesarDonador - donador {} sin mision activa, se le asigno la mision {}",
               requestId, donadorID, misionAsignadaId);

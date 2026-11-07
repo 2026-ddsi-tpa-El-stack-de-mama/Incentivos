@@ -21,4 +21,7 @@ public interface DonadoresYEntidadesClient {
 
   @PatchMapping("/donadores/{id}/categoria")
   void modificarCategoria(@PathVariable String id, @RequestParam String categoria);
+
+  @PostMapping("/donadores/{id}/publicar")
+  void publicarDonador(@PathVariable String id);
 }
