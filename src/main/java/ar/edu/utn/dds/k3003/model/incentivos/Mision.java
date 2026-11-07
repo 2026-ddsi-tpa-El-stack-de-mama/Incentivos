@@ -15,6 +15,8 @@ public class Mision {
 
   private String nombre;
 
+  private String descripcion;
+
   @Enumerated(EnumType.STRING)
   private TipoMisionEnum tipo;
 
@@ -27,6 +29,8 @@ public class Mision {
   @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(name = "insignia_id")
   private Insignia insignia;
+
+  public static final String DESCRIPCION_FUERA_DE_SERVICIO = "misión fuera de servicio";
 
   public Mision() {}
 
@@ -89,6 +93,18 @@ public class Mision {
 
   public void setTipo(TipoMisionEnum tipo) {
     this.tipo = tipo;
+  }
+
+  public String getDescripcion() {
+    return descripcion;
+  }
+
+  public void setDescripcion(String descripcion) {
+    this.descripcion = descripcion;
+  }
+
+  public boolean isFueraDeServicio() {
+    return DESCRIPCION_FUERA_DE_SERVICIO.equals(descripcion);
   }
 
   public Insignia getInsignia() {

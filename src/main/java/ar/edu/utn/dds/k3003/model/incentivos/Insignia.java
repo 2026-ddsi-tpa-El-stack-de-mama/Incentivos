@@ -15,6 +15,8 @@ public class Insignia {
 
   private String descripcion;
 
+  public static final String DESCRIPCION_FUERA_DE_SERVICIO = "insignia fuera de servicio";
+
   public Insignia() {}
 
   public Insignia(String id, String nombre, String descripcion) {
@@ -45,6 +47,10 @@ public class Insignia {
 
   public void setDescripcion(String descripcion) {
     this.descripcion = descripcion;
+  }
+
+  public boolean isFueraDeServicio() {
+    return DESCRIPCION_FUERA_DE_SERVICIO.equals(descripcion);
   }
 }
 

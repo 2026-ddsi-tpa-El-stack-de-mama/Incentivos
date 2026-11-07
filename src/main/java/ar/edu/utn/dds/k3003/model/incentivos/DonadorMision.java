@@ -17,12 +17,16 @@ public class DonadorMision {
 
   private LocalDateTime fechaAsignacion;
 
+  // Ultimo valor calculado por procesarDonador. Es Integer porque las filas viejas lo tienen en null.
+  private Integer progresoActual;
+
   public DonadorMision() {}
 
   public DonadorMision(UUID donadorId, Mision mision) {
     this.donadorId = donadorId;
     this.mision = mision;
     this.fechaAsignacion = LocalDateTime.now();
+    this.progresoActual = 0;
   }
 
   public UUID getDonadorId() {
@@ -47,6 +51,14 @@ public class DonadorMision {
 
   public void setFechaAsignacion(LocalDateTime fechaAsignacion) {
     this.fechaAsignacion = fechaAsignacion;
+  }
+
+  public int getProgresoActual() {
+    return progresoActual != null ? progresoActual : 0;
+  }
+
+  public void setProgresoActual(int progresoActual) {
+    this.progresoActual = progresoActual;
   }
 }
 

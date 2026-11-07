@@ -15,7 +15,6 @@ import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
 import ar.edu.utn.dds.k3003.dtos.CambioCategoriaDTO;
 import ar.edu.utn.dds.k3003.dtos.MisionHistoricoDTO;
 import ar.edu.utn.dds.k3003.dtos.ResultadoProcesamiento;
-import ar.edu.utn.dds.k3003.eventos.AccionEvento;
 import ar.edu.utn.dds.k3003.eventos.Evento;
 import ar.edu.utn.dds.k3003.eventos.PublicadorEventos;
 import ar.edu.utn.dds.k3003.model.incentivos.*;
@@ -80,6 +79,61 @@ public class Fachada implements FachadaIncentivos {
     if (eventos != null) eventos.publicar(evento);
   }
 
+  /**
+   * Publica la foto de insignias y mision en curso del donador. Va despues de cada cambio y nunca
+   * falla hacia el llamador: el cambio ya quedo guardado.
+   */
+  public void publicarMisionInsigniaDeDonador(UUID donadorUUID) {
+    if (eventos == null) return;
+    try {
+      List<InsigniaDTO> insignias = donadorInsigniaRepository.findConInsigniaByDonadorId(donadorUUID).stream()
+          .map(asignada -> IncentivosMapper.toDto(asignada.getInsignia()))
+          .toList();
+      Optional<DonadorMision> enCurso = donadorMisionRepository.findByDonadorId(donadorUUID);
+      List<MisionDTO> misiones = enCurso
+          .map(dm -> List.of(IncentivosMapper.toDto(dm.getMision())))
+          .orElse(List.of());
+      Integer progresoActual = enCurso.map(DonadorMision::getProgresoActual).orElse(null);
+      Integer progresoRequerido = enCurso.map(dm -> requeridoPara(tipoDe(dm.getMision()))).orElse(null);
+      eventos.publicar(Evento.misionInsignia(donadorUUID, insignias, misiones, progresoActual, progresoRequerido));
+    } catch (RuntimeException e) {
+      logger.warn("No se pudo publicar incentivos del donador {}: {}", donadorUUID, e.getMessage(), e);
+    }
+  }
+
+  // Un cambio de catalogo modifica la foto de todos los donadores que tienen esa insignia o mision.
+  private void publicarMisionInsigniaDeDonadores(Collection<UUID> donadores) {
+    donadores.forEach(this::publicarMisionInsigniaDeDonador);
+  }
+
+  private List<UUID> donadoresConInsignia(UUID insigniaUUID) {
+    return eventos == null ? List.of() : donadorInsigniaRepository.findDonadorIdsByInsigniaId(insigniaUUID);
+  }
+
+  private Insignia insigniaEnServicio(String insigniaID) {
+    Insignia insignia = insigniaRepository.findById(UUID.fromString(insigniaID))
+        .orElseThrow(() -> new NoSuchElementException("Insignia inexistente: " + insigniaID));
+    if (insignia.isFueraDeServicio()) throw new IllegalStateException("Insignia fuera de servicio");
+    return insignia;
+  }
+
+  // Prefiere una insignia que no otorgue ninguna otra mision. Falla si no queda ninguna en servicio.
+  private Insignia insigniaDeReemplazo(UUID insigniaUUID) {
+    List<Insignia> disponibles = insigniaRepository.findAll().stream()
+        .filter(candidata -> !candidata.isFueraDeServicio())
+        .filter(candidata -> !insigniaUUID.toString().equals(candidata.getId()))
+        .toList();
+    return disponibles.stream()
+        .filter(candidata -> !misionRepository.existsByInsignia_Id(UUID.fromString(candidata.getId())))
+        .findFirst()
+        .or(() -> disponibles.stream().findFirst())
+        .orElseThrow(() -> new IllegalStateException("No hay otra insignia en servicio para las misiones que la usan"));
+  }
+
+  private List<UUID> donadoresConMision(UUID misionUUID) {
+    return eventos == null ? List.of() : donadorMisionRepository.findDonadorIdsByMisionId(misionUUID);
+  }
+
   @Override
   public InsigniaDTO agregarInsignia(InsigniaDTO insignia) {
     String requestId = MDC.get("request_id");
@@ -99,7 +153,6 @@ public class Fachada implements FachadaIncentivos {
     Insignia saved = insigniaRepository.save(ent);
     InsigniaDTO dto = IncentivosMapper.toDto(saved);
     logger.info("[{}] Fachada.agregarInsignia - salida: id={}", requestId, dto.id());
-    publicar(Evento.insignia(AccionEvento.INSIGNIA_CREADA, dto));
     return dto;
   }
 
@@ -107,21 +160,38 @@ public class Fachada implements FachadaIncentivos {
     if (insignia == null) throw new RuntimeException("Insignia nula");
     if (insignia.id() == null) throw new RuntimeException("Insignia sin id");
     UUID uuid = UUID.fromString(insignia.id());
-    if (!insigniaRepository.existsById(uuid)) throw new RuntimeException("Insignia inexistente");
-    Insignia ent = new Insignia(insignia.id(), insignia.nombre(), insignia.descripcion());
+    Insignia existente = insigniaRepository.findById(uuid)
+        .orElseThrow(() -> new RuntimeException("Insignia inexistente"));
+    String descripcion = existente.isFueraDeServicio() ? existente.getDescripcion() : insignia.descripcion();
+    Insignia ent = new Insignia(insignia.id(), insignia.nombre(), descripcion);
     Insignia saved = insigniaRepository.save(ent);
     InsigniaDTO dto = IncentivosMapper.toDto(saved);
-    publicar(Evento.insignia(AccionEvento.INSIGNIA_MODIFICADA, dto));
+    publicarMisionInsigniaDeDonadores(donadoresConInsignia(uuid));
     return dto;
   }
 
   public void eliminarInsignia(String insigniaID) {
     if (insigniaID == null) throw new RuntimeException("Insignia inexistente");
     UUID uuid = UUID.fromString(insigniaID);
-    if (!insigniaRepository.existsById(uuid)) throw new RuntimeException("Insignia inexistente");
+    Insignia insignia = insigniaRepository.findById(uuid)
+        .orElseThrow(() -> new RuntimeException("Insignia inexistente"));
+
+    // No se borra la fila: queda fuera de servicio y sus misiones pasan a otorgar otra. El reemplazo
+    // se busca primero para no tocar nada si no hay ninguna disponible.
+    List<Mision> misiones = misionRepository.findByInsignia_Id(uuid);
+    Insignia reemplazo = misiones.isEmpty() ? null : insigniaDeReemplazo(uuid);
+
+    insignia.setDescripcion(Insignia.DESCRIPCION_FUERA_DE_SERVICIO);
+    insigniaRepository.save(insignia);
+
+    misiones.forEach(mision -> mision.setInsignia(reemplazo));
+    misionRepository.saveAll(misiones);
+
+    // Se buscan antes de desasignar: despues ya no queda registro de quien la tenia.
+    Set<UUID> afectados = new LinkedHashSet<>(donadoresConInsignia(uuid));
+    misiones.forEach(mision -> afectados.addAll(donadoresConMision(UUID.fromString(mision.getId()))));
     donadorInsigniaRepository.deleteByInsigniaId(uuid);
-    insigniaRepository.deleteById(uuid);
-    publicar(Evento.insigniaEliminada(insigniaID));
+    publicarMisionInsigniaDeDonadores(afectados);
   }
 
   public List<InsigniaDTO> listarInsignias() {
@@ -150,8 +220,7 @@ public class Fachada implements FachadaIncentivos {
       throw new IllegalArgumentException("La mision debe tener una insignia asociada");
     }
 
-    Insignia insignia = insigniaRepository.findById(UUID.fromString(mision.insigniaID()))
-        .orElseThrow(() -> new NoSuchElementException("Insignia inexistente: " + mision.insigniaID()));
+    Insignia insignia = insigniaEnServicio(mision.insigniaID());
 
     Mision ent = new Mision(
         mision.id(),
@@ -165,14 +234,14 @@ public class Fachada implements FachadaIncentivos {
 
     Mision saved = misionRepository.save(ent);
     MisionDTO dto = IncentivosMapper.toDto(saved);
-    publicar(Evento.mision(AccionEvento.MISION_CREADA, dto));
     return dto;
   }
 
   public MisionDTO modificarMision(MisionDTO mision) {
     if (mision == null || mision.id() == null) throw new RuntimeException("Mision nula o sin id");
     UUID uuid = UUID.fromString(mision.id());
-    if (!misionRepository.existsById(uuid)) throw new RuntimeException("Mision inexistente");
+    Mision existente = misionRepository.findConInsigniaById(uuid)
+        .orElseThrow(() -> new RuntimeException("Mision inexistente"));
     Mision ent = new Mision(
         mision.id(),
         mision.nombre(),
@@ -181,19 +250,40 @@ public class Fachada implements FachadaIncentivos {
         mision.categoriaFin() != null ? mision.categoriaFin().name() : null,
         mision.tipo()
     );
-    Mision saved = misionRepository.save(ent);
-    MisionDTO dto = IncentivosMapper.toDto(saved);
-    publicar(Evento.mision(AccionEvento.MISION_MODIFICADA, dto));
+    // Sin insigniaID se conserva la actual: el constructor de Mision no asocia la insignia.
+    ent.setInsignia(mision.insigniaID() != null
+        ? insigniaEnServicio(mision.insigniaID())
+        : existente.getInsignia());
+    ent.setDescripcion(existente.getDescripcion());
+    misionRepository.save(ent);
+    // ent ya tiene la insignia cargada; la copia que devuelve save la trae lazy.
+    MisionDTO dto = IncentivosMapper.toDto(ent);
+    publicarMisionInsigniaDeDonadores(donadoresConMision(uuid));
     return dto;
   }
 
   public void eliminarMision(String misionID) {
     if (misionID == null) throw new RuntimeException("Mision inexistente");
     UUID uuid = UUID.fromString(misionID);
-    if (!misionRepository.existsById(uuid)) throw new RuntimeException("Mision inexistente");
+    Mision mision = misionRepository.findById(uuid)
+        .orElseThrow(() -> new RuntimeException("Mision inexistente"));
+
+    // No se borra la fila: mision_historico la sigue referenciando. Queda fuera de servicio y se
+    // desasigna, y buscarMisionParaCategoria ya no la ofrece.
+    mision.setDescripcion(Mision.DESCRIPCION_FUERA_DE_SERVICIO);
+    misionRepository.save(mision);
+
+    List<MisionHistorico> activas =
+        misionHistoricoRepository.findByMision_IdAndEstado(uuid, MisionHistorico.EstadoMision.ACTIVA);
+    activas.forEach(hist -> {
+      hist.setEstado(MisionHistorico.EstadoMision.CANCELADA);
+      hist.setFechaFin(LocalDateTime.now());
+    });
+    misionHistoricoRepository.saveAll(activas);
+
+    List<UUID> afectados = donadorMisionRepository.findDonadorIdsByMisionId(uuid);
     donadorMisionRepository.deleteByMisionId(uuid);
-    misionRepository.deleteById(uuid);
-    publicar(Evento.misionEliminada(misionID));
+    publicarMisionInsigniaDeDonadores(afectados);
   }
 
   public List<MisionDTO> listarMisiones() {
@@ -238,12 +328,13 @@ public class Fachada implements FachadaIncentivos {
     UUID misionUUID = UUID.fromString(misionDTO.id());
     Mision mision = misionRepository.findById(misionUUID)
         .orElseThrow(() -> new RuntimeException("Mision inexistente"));
+    if (mision.isFueraDeServicio()) throw new IllegalStateException("Mision fuera de servicio");
     UUID donadorUUID = UUID.fromString(donadorID);
     DonadorMision dm = new DonadorMision(donadorUUID, mision);
     donadorMisionRepository.save(dm);
     MisionHistorico historico = new MisionHistorico(donadorUUID, mision, MisionHistorico.EstadoMision.ACTIVA);
-    historico = misionHistoricoRepository.save(historico);
-    publicar(Evento.misionDeDonador(AccionEvento.MISION_ASIGNADA, historico));
+    misionHistoricoRepository.save(historico);
+    publicarMisionInsigniaDeDonador(donadorUUID);
   }
 
   @Override
@@ -255,6 +346,7 @@ public class Fachada implements FachadaIncentivos {
     UUID insigniaUUID = UUID.fromString(insigniaDTO.id());
     Insignia insignia = insigniaRepository.findById(insigniaUUID)
         .orElseThrow(() -> new NoSuchElementException("Insignia inexistente"));
+    if (insignia.isFueraDeServicio()) throw new IllegalStateException("Insignia fuera de servicio");
     UUID donadorUUID = UUID.fromString(donadorID);
 
     if (donadorInsigniaRepository.existsByDonadorIdAndInsigniaId(donadorUUID, insigniaUUID)) {
@@ -274,7 +366,7 @@ public class Fachada implements FachadaIncentivos {
     // Unico punto de medicion: lo usan el endpoint y procesarDonador (job incluido).
     // Solo cuenta asignaciones nuevas (si el donador ya la tenia, devuelve false mas arriba).
     if (metricas != null) metricas.insigniasAsignadas.increment();
-    publicar(Evento.insigniaDeDonador(AccionEvento.INSIGNIA_ASIGNADA, donadorUUID, insignia));
+    publicarMisionInsigniaDeDonador(donadorUUID);
     return true;
   }
   public void registrarCambioCategoriaEnDonador(String donadorID, String nuevaCategoria) {
@@ -397,9 +489,9 @@ public class Fachada implements FachadaIncentivos {
         if (misionParaAsignar.isPresent()) {
           Mision nuevaMision = misionParaAsignar.get();
           donadorMisionRepository.save(new DonadorMision(donadorUUID, nuevaMision));
-          MisionHistorico historico = misionHistoricoRepository.save(
+          misionHistoricoRepository.save(
               new MisionHistorico(donadorUUID, nuevaMision, MisionHistorico.EstadoMision.ACTIVA));
-          publicar(Evento.misionDeDonador(AccionEvento.MISION_ASIGNADA, historico));
+          publicarMisionInsigniaDeDonador(donadorUUID);
           misionAsignadaId = nuevaMision.getId();
           logger.info("[{}] procesarDonador - donador {} sin mision activa, se le asigno la mision {}",
               requestId, donadorID, misionAsignadaId);
@@ -423,11 +515,12 @@ public class Fachada implements FachadaIncentivos {
 
     if (donaciones == null) donaciones = List.of();
 
-    boolean completada = evaluarMision(mision, donaciones);
+    ProgresoMision progreso = calcularProgreso(mision, donaciones);
 
-    if (!completada) {
-      logger.info("[{}] procesarDonador - donador {} no completo la mision {}",
-          requestId, donadorID, mision.getId());
+    if (!progreso.cumplida()) {
+      logger.info("[{}] procesarDonador - donador {} no completo la mision {} ({}/{})",
+          requestId, donadorID, mision.getId(), progreso.actual(), progreso.requerido());
+      actualizarProgreso(donadorMision, progreso);
       return new ResultadoProcesamiento(
           ResultadoProcesamiento.Estado.MISION_NO_COMPLETADA, mision.getId(), false, false, null);
     }
@@ -464,7 +557,6 @@ public class Fachada implements FachadaIncentivos {
         hist.setEstado(MisionHistorico.EstadoMision.COMPLETADA);
         hist.setFechaFin(LocalDateTime.now());
         misionHistoricoRepository.save(hist);
-        publicar(Evento.misionDeDonador(AccionEvento.MISION_COMPLETADA, hist));
         historicoMarcado = true;
         break;
       }
@@ -494,15 +586,17 @@ public class Fachada implements FachadaIncentivos {
       if (siguienteMision.isPresent()) {
         Mision nextMision = siguienteMision.get();
         donadorMisionRepository.save(new DonadorMision(donadorUUID, nextMision));
-        MisionHistorico historicoSiguiente = misionHistoricoRepository.save(
+        misionHistoricoRepository.save(
             new MisionHistorico(donadorUUID, nextMision, MisionHistorico.EstadoMision.ACTIVA));
-        publicar(Evento.misionDeDonador(AccionEvento.MISION_ASIGNADA, historicoSiguiente));
         siguienteMisionId = nextMision.getId();
       } else {
         logger.info("[{}] procesarDonador - no hay siguiente mision para la categoria {} (donador {})",
             requestId, nuevaCategoria, donadorID);
       }
     }
+
+    // Una sola vez y al final: cubre la mision completada, con o sin siguiente mision.
+    publicarMisionInsigniaDeDonador(donadorUUID);
 
     return new ResultadoProcesamiento(
         ResultadoProcesamiento.Estado.MISION_COMPLETADA, mision.getId(),
@@ -516,6 +610,7 @@ public class Fachada implements FachadaIncentivos {
   private Optional<Mision> buscarMisionParaCategoria(String categoria, String misionAExcluirId) {
     if (categoria == null) return Optional.empty();
     return misionRepository.findAll().stream()
+        .filter(m -> !m.isFueraDeServicio())
         .filter(m -> misionAExcluirId == null || !m.getId().equals(misionAExcluirId))
         .filter(m -> categoria.equals(m.getCategoriaInicio()))
         .findFirst();
@@ -551,25 +646,50 @@ public class Fachada implements FachadaIncentivos {
   // hecho verificado contra el enunciado completo — hay que confirmarlo con el
   // equipo antes de mergear. Si se decide lo contrario para algún tipo, cambiar
   // solo esa rama.
-  private boolean evaluarMision(Mision misionActual, List<DonacionDTO> donaciones) {
-    TipoMisionEnum tipoMision = misionActual.getTipo();
+  private ProgresoMision calcularProgreso(Mision misionActual, List<DonacionDTO> donaciones) {
+    TipoMisionEnum tipoMision = tipoDe(misionActual);
     logger.info("tipo mision a evaluar: {}", tipoMision);
-    if (tipoMision == null) tipoMision = inferirTipoPorNombre(misionActual.getNombre());
     //todo: cambiar conqueja a aceptada y =>20
     List<DonacionDTO> aceptadas = filtrarPorEstado(donaciones, EstadoDonacionEnum.ACEPTADA);
 
-    if (tipoMision == null) return contarDonacionesExitosas(aceptadas) >= 5;
-
     logger.info("Evaluando aceptadas: {}", aceptadas);
-    return switch (tipoMision) {
-      case DONACIONES_EXITOSAS -> contarDonacionesExitosas(aceptadas) >= 5;
+    int actual = tipoMision == null ? contarDonacionesExitosas(aceptadas) : switch (tipoMision) {
+      case DONACIONES_EXITOSAS -> contarDonacionesExitosas(aceptadas);
       // TODO: confirmar con el equipo si corresponde ACEPTADA o todas las donaciones
-      case COMPLETITUD -> evaluarCompletitud(aceptadas);
+      case COMPLETITUD -> contarCategoriasDistintas(aceptadas);
       // TODO: confirmar con el equipo si corresponde ACEPTADA o todas las donaciones
-      case DONACIONES_ASCENDENTES -> evaluarDonacionesAscendentes(aceptadas);
+      case DONACIONES_ASCENDENTES -> contarUltimasAscendentes(aceptadas);
       // TODO: confirmar con el equipo si corresponde ACEPTADA o todas las donaciones
-      case REVOLUCION_DONADORA -> contarDonacionesGrandes(aceptadas) > 3;
+      case REVOLUCION_DONADORA -> contarDonacionesGrandes(aceptadas);
     };
+    return new ProgresoMision(actual, requeridoPara(tipoMision));
+  }
+
+  private record ProgresoMision(int actual, int requerido) {
+    boolean cumplida() {
+      return actual >= requerido;
+    }
+  }
+
+  private TipoMisionEnum tipoDe(Mision mision) {
+    return mision.getTipo() != null ? mision.getTipo() : inferirTipoPorNombre(mision.getNombre());
+  }
+
+  private int requeridoPara(TipoMisionEnum tipoMision) {
+    if (tipoMision == null) return 5;
+    return switch (tipoMision) {
+      case DONACIONES_EXITOSAS, DONACIONES_ASCENDENTES -> 5;
+      case COMPLETITUD -> 3;
+      case REVOLUCION_DONADORA -> 4;
+    };
+  }
+
+  // Se publica solo si cambio: procesarDonador corre para todos los donadores en cada pasada del job.
+  private void actualizarProgreso(DonadorMision donadorMision, ProgresoMision progreso) {
+    if (donadorMision.getProgresoActual() == progreso.actual()) return;
+    donadorMision.setProgresoActual(progreso.actual());
+    donadorMisionRepository.save(donadorMision);
+    publicarMisionInsigniaDeDonador(donadorMision.getDonadorId());
   }
 
   private List<DonacionDTO> filtrarPorEstado(List<DonacionDTO> donaciones, EstadoDonacionEnum estado) {
@@ -594,7 +714,7 @@ public class Fachada implements FachadaIncentivos {
   // con el requisito de negocio de "3 categorías distintas") y se loguean los casos
   // en que no se pudo resolver la categoría de una donación, en vez de comerse el
   // error silenciosamente.
-  private boolean evaluarCompletitud(List<DonacionDTO> donacionesAceptadas) {
+  private int contarCategoriasDistintas(List<DonacionDTO> donacionesAceptadas) {
     String requestId = MDC.get("request_id");
     Set<String> categorias = new HashSet<>();
     for (var donacion : donacionesAceptadas) {
@@ -602,11 +722,11 @@ public class Fachada implements FachadaIncentivos {
       if (categoria != null) {
         categorias.add(categoria);
       } else if (donacion != null) {
-        logger.warn("[{}] evaluarCompletitud - no se pudo resolver categoria para donacionID={} productoID={}",
+        logger.warn("[{}] contarCategoriasDistintas - no se pudo resolver categoria para donacionID={} productoID={}",
             requestId, donacion.id(), donacion.productoID());
       }
     }
-    return categorias.size() >= 3;
+    return categorias.size();
   }
 
   private String obtenerCategoriaProducto(DonacionDTO donacion) {
@@ -622,7 +742,7 @@ public class Fachada implements FachadaIncentivos {
     }
   }
 
-  private long contarDonacionesExitosas(List<DonacionDTO> donacionesAceptadas) {
+  private int contarDonacionesExitosas(List<DonacionDTO> donacionesAceptadas) {
     return donacionesAceptadas.size();
   }
 
@@ -648,29 +768,28 @@ public class Fachada implements FachadaIncentivos {
   //      agregue un campo de fecha (p.ej. `fechaCreacion`) al DTO y lo propague — hay
   //      que coordinarlo con el equipo que tiene ese servicio, no es algo que se
   //      resuelva solo del lado de Incentivos.
-  private boolean evaluarDonacionesAscendentes(List<DonacionDTO> donacionesAceptadas) {
+  // Devuelve cuantas de las ultimas donaciones, contando desde la mas reciente, vienen en alza.
+  private int contarUltimasAscendentes(List<DonacionDTO> donacionesAceptadas) {
     String requestId = MDC.get("request_id");
-    if (donacionesAceptadas.size() < 5) return false;
 
-    logger.warn("[{}] evaluarDonacionesAscendentes - evaluando sin garantia de orden cronologico: "
+    logger.warn("[{}] contarUltimasAscendentes - evaluando sin garantia de orden cronologico: "
             + "DonacionDTO no tiene campo de fecha, se asume que la lista ya viene ordenada "
             + "ascendentemente por donacionesClient.buscarPorDonadorYFechaInicio. Pendiente: agregar "
             + "campo de fecha al DTO en el servicio de Donaciones (ver punto 3 del review).",
         requestId);
 
-    List<DonacionDTO> ultimasCinco =
-        donacionesAceptadas.subList(donacionesAceptadas.size() - 5, donacionesAceptadas.size());
+    int racha = 0;
     Integer anterior = null;
-    for (DonacionDTO donacion : ultimasCinco) {
-      if (donacion == null || donacion.cantidad() == null) return false;
-      if (anterior != null && donacion.cantidad() <= anterior) return false;
-      anterior = donacion.cantidad();
+    for (DonacionDTO donacion : donacionesAceptadas) {
+      Integer cantidad = donacion.cantidad();
+      racha = cantidad == null ? 0 : anterior != null && cantidad > anterior ? racha + 1 : 1;
+      anterior = cantidad;
     }
-    return true;
+    return racha;
   }
 
-  private long contarDonacionesGrandes(List<DonacionDTO> donacionesAceptadas) {
-    return donacionesAceptadas.stream()
+  private int contarDonacionesGrandes(List<DonacionDTO> donacionesAceptadas) {
+    return (int) donacionesAceptadas.stream()
         .filter(d -> d.cantidad() != null && d.cantidad() > 50)
         .count();
   }

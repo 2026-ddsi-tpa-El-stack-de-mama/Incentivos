@@ -27,6 +27,8 @@ public interface MisionHistoricoRepository extends JpaRepository<MisionHistorico
       """)
   List<MisionHistorico> findByDonadorIdOrderByFechaInicioDesc(@Param("donadorId") UUID donadorId);
 
+  List<MisionHistorico> findByMision_IdAndEstado(UUID misionId, MisionHistorico.EstadoMision estado);
+
   @Query("""
     SELECT h FROM MisionHistorico h
     JOIN FETCH h.mision m
