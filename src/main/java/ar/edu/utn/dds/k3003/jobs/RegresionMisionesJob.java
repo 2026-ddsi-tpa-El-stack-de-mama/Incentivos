@@ -1,16 +1,18 @@
 package ar.edu.utn.dds.k3003.jobs;
 
+import ar.edu.utn.dds.k3003.Fachada;
 import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.DonacionDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.donaciones.EstadoDonacionEnum;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.TipoMisionEnum;
 import ar.edu.utn.dds.k3003.clientes.DonacionesClient;
 import ar.edu.utn.dds.k3003.config.MetricasNegocio;
 import ar.edu.utn.dds.k3003.clientes.DonadoresYEntidadesClient;
-import ar.edu.utn.dds.k3003.eventos.AccionEvento;
 import ar.edu.utn.dds.k3003.eventos.Evento;
 import ar.edu.utn.dds.k3003.eventos.PublicadorEventos;
+import ar.edu.utn.dds.k3003.model.incentivos.CambioCategoriaHistorico;
 import ar.edu.utn.dds.k3003.model.incentivos.Mision;
 import ar.edu.utn.dds.k3003.model.incentivos.MisionHistorico;
+import ar.edu.utn.dds.k3003.repositories.incentivos.CambioCategoriaHistoricoRepository;
 import ar.edu.utn.dds.k3003.repositories.incentivos.DonadorInsigniaRepository;
 import ar.edu.utn.dds.k3003.repositories.incentivos.MisionHistoricoRepository;
 import ar.edu.utn.dds.k3003.observabilidad.TraceContext;
@@ -27,12 +29,17 @@ public class RegresionMisionesJob {
 
   private static final Logger logger = LoggerFactory.getLogger(RegresionMisionesJob.class);
 
+  // Tiene que coincidir con el minimo que pide Fachada.requeridoPara para DONACIONES_EXITOSAS.
+  private static final int DONACIONES_MINIMAS = 5;
+
   private final MisionHistoricoRepository misionHistoricoRepository;
   private final DonacionesClient donacionesClient;
   private final DonadoresYEntidadesClient donadoresYEntidadesClient;
   private final DonadorInsigniaRepository donadorInsigniaRepository;
+  private final CambioCategoriaHistoricoRepository cambioCategoriaHistoricoRepository;
   private final MetricasNegocio metricas;
   private final PublicadorEventos eventos;
+  private final Fachada fachada;
 
   @Autowired
   public RegresionMisionesJob(
@@ -40,14 +47,18 @@ public class RegresionMisionesJob {
       DonacionesClient donacionesClient,
       DonadoresYEntidadesClient donadoresYEntidadesClient,
       DonadorInsigniaRepository donadorInsigniaRepository,
+      CambioCategoriaHistoricoRepository cambioCategoriaHistoricoRepository,
       MetricasNegocio metricas,
-      PublicadorEventos eventos) {
+      PublicadorEventos eventos,
+      Fachada fachada) {
     this.misionHistoricoRepository = misionHistoricoRepository;
     this.donacionesClient = donacionesClient;
     this.donadoresYEntidadesClient = donadoresYEntidadesClient;
     this.donadorInsigniaRepository = donadorInsigniaRepository;
+    this.cambioCategoriaHistoricoRepository = cambioCategoriaHistoricoRepository;
     this.metricas = metricas;
     this.eventos = eventos;
+    this.fachada = fachada;
   }
 
   // Cada 5 minutos
@@ -103,27 +114,27 @@ public class RegresionMisionesJob {
         .filter(d -> d != null && d.estado() == EstadoDonacionEnum.ACEPTADA)
         .count();
 
-    if (aceptadasAhora >= 20) return false;
+    if (aceptadasAhora >= DONACIONES_MINIMAS) return false;
 
-    logger.info("[{}] revisarRegresiones - donador {} bajo de 20 aceptadas ({}), revirtiendo mision {}",
-        jobId, donadorID, aceptadasAhora, mision.getId());
+    logger.info("[{}] revisarRegresiones - donador {} bajo de {} aceptadas ({}), revirtiendo mision {}",
+        jobId, donadorID, DONACIONES_MINIMAS, aceptadasAhora, mision.getId());
 
     hist.setEstado(MisionHistorico.EstadoMision.REGRESION);
     misionHistoricoRepository.save(hist);
     metricas.misionesRegresiones.increment();
-    eventos.publicar(Evento.misionDeDonador(AccionEvento.MISION_REVERTIDA, hist));
 
     if (mision.getInsignia() != null) {
       UUID insigniaUUID = UUID.fromString(mision.getInsignia().getId());
       donadorInsigniaRepository.deleteByDonadorIdAndInsigniaId(donadorUUID, insigniaUUID);
       metricas.insigniasRevocadas.increment();
-      eventos.publicar(Evento.insigniaDeDonador(AccionEvento.INSIGNIA_REVOCADA, donadorUUID, mision.getInsignia()));
     }
+    fachada.publicarMisionInsigniaDeDonador(donadorUUID);
 
     String categoriaInicio = mision.getCategoriaInicio();
     if (categoriaInicio != null) {
       try {
         donadoresYEntidadesClient.modificarCategoria(donadorID, categoriaInicio);
+        registrarHistorialCategoria(donadorUUID, mision.getCategoriaFin(), categoriaInicio, jobId);
         metricas.categoriaCambiada(mision.getCategoriaFin(), categoriaInicio, "regresion");
         eventos.publicar(Evento.categoriaCambiada(
             donadorID, mision.getCategoriaFin(), categoriaInicio, Evento.MOTIVO_REGRESION));
@@ -134,5 +145,15 @@ public class RegresionMisionesJob {
     }
 
     return true;
+  }
+
+  // Igual que en Fachada: si falla el historial, el cambio de categoria ya quedo hecho.
+  private void registrarHistorialCategoria(UUID donadorUUID, String anterior, String nueva, String jobId) {
+    try {
+      cambioCategoriaHistoricoRepository.save(new CambioCategoriaHistorico(donadorUUID, anterior, nueva));
+    } catch (RuntimeException e) {
+      logger.warn("[{}] revisarRegresiones - no se pudo registrar historico de categoria de donador {}: {}",
+          jobId, donadorUUID, e.getMessage(), e);
+    }
   }
 }
