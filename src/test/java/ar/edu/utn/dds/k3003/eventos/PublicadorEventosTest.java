@@ -19,15 +19,13 @@ import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.MisionDTO;
 import ar.edu.utn.dds.k3003.catedra.dtos.incentivos.TipoMisionEnum;
 import ar.edu.utn.dds.k3003.config.MetricasNegocio;
 import ar.edu.utn.dds.k3003.config.RabbitEventosConfig;
-import ar.edu.utn.dds.k3003.model.incentivos.Insignia;
-import ar.edu.utn.dds.k3003.model.incentivos.Mision;
-import ar.edu.utn.dds.k3003.model.incentivos.MisionHistorico;
 import ar.edu.utn.dds.k3003.queue.EventoQueue;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.fridujo.rabbitmq.mock.MockConnectionFactory;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -46,7 +44,8 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 class PublicadorEventosTest {
 
   private static final EventoQueue EVENTO =
-      Evento.insignia(AccionEvento.INSIGNIA_CREADA, new InsigniaDTO("id-1", "Nombre", "Desc"));
+      Evento.misionInsignia(UUID.randomUUID(), List.of(new InsigniaDTO("id-1", "Nombre", "Desc")), List.of(),
+          null, null);
 
   private final MeterRegistry registry = new SimpleMeterRegistry();
   private final MetricasNegocio metricas = new MetricasNegocio(registry);
@@ -68,7 +67,7 @@ class PublicadorEventosTest {
 
   private double contador(String resultado) {
     return registry.counter("eventos.publicados",
-        "tipo", "InsigniaEvento", "resultado", resultado).count();
+        "tipo", "MisionInsigniaEvento", "resultado", resultado).count();
   }
 
   @Test
@@ -85,7 +84,7 @@ class PublicadorEventosTest {
   void publicaEnLaColaPorElExchangePorDefecto() {
     MDC.put("traceId", "trace-del-test");
     try {
-      EventoQueue conTraza = Evento.misionEliminada("id-1");
+      EventoQueue conTraza = Evento.categoriaCambiada("id-1", null, "COLABORADOR", Evento.MOTIVO_PROGRESO);
       publicador("localhost", "cola").publicar(conTraza);
 
       ArgumentCaptor<Message> mensaje = ArgumentCaptor.forClass(Message.class);
@@ -93,11 +92,11 @@ class PublicadorEventosTest {
       var propiedades = mensaje.getValue().getMessageProperties();
       assertEquals("application/json", propiedades.getContentType());
       assertEquals(conTraza.id(), propiedades.getMessageId());
-      assertEquals("MisionEvento", propiedades.getType());
+      assertEquals("CategoriaDonadorEvento", propiedades.getType());
       assertEquals("trace-del-test", propiedades.getHeader("X-Trace-Id"));
       assertNull(propiedades.getHeader("__TypeId__"));
       assertEquals(1, registry.counter("eventos.publicados",
-          "tipo", "MisionEvento", "resultado", "ok").count());
+          "tipo", "CategoriaDonadorEvento", "resultado", "ok").count());
     } finally {
       MDC.remove("traceId");
     }
@@ -160,23 +159,15 @@ class PublicadorEventosTest {
   // Si un evento no se puede leer, EventoWorker lo devuelve a la cola para siempre.
   @Test
   void elWorkerPuedeLeerTodosLosEventos() {
-    UUID donador = UUID.randomUUID();
-    Insignia insignia = new Insignia(UUID.randomUUID().toString(), "I", "D");
-    Mision mision = new Mision(UUID.randomUUID().toString(), "M", null, "OCASIONAL", null,
-        TipoMisionEnum.COMPLETITUD);
-    MisionHistorico historico =
-        new MisionHistorico(donador, mision, MisionHistorico.EstadoMision.ACTIVA);
-    historico.setId(1L);
     MisionDTO misionDto = new MisionDTO("id", "M", null, CategoriaDonadorEnum.OCASIONAL, null,
         TipoMisionEnum.COMPLETITUD);
     Map<EventoQueue, Class<?>> eventos = Map.of(
-        EVENTO, InsigniaEvento.class,
-        Evento.insigniaEliminada("id"), InsigniaEvento.class,
-        Evento.mision(AccionEvento.MISION_CREADA, misionDto), MisionEvento.class,
-        Evento.misionEliminada("id"), MisionEvento.class,
-        Evento.misionDeDonador(AccionEvento.MISION_ASIGNADA, historico), MisionDonadorEvento.class,
-        Evento.insigniaDeDonador(AccionEvento.INSIGNIA_ASIGNADA, donador, insignia),
-        InsigniaDonadorEvento.class,
+        EVENTO, MisionInsigniaEvento.class,
+        Evento.misionInsignia(UUID.randomUUID(),
+            List.of(new InsigniaDTO("id", "I", "D")), List.of(misionDto), 3, 5),
+        MisionInsigniaEvento.class,
+        Evento.misionInsignia(UUID.randomUUID(), List.of(), List.of(), null, null),
+        MisionInsigniaEvento.class,
         Evento.categoriaCambiada("id", null, "COLABORADOR", Evento.MOTIVO_PROGRESO),
         CategoriaDonadorEvento.class);
 
@@ -210,11 +201,10 @@ class PublicadorEventosTest {
           ObjectMapper worker = new ObjectMapper();
           EventoQueue leido = worker.readValue(recibido.getBody(), EventoQueue.class);
           assertEquals(EVENTO.id(), leido.id());
-          assertEquals("InsigniaEvento", leido.tipoEvento());
-          InsigniaEvento dto = worker.convertValue(leido.descripcion(), InsigniaEvento.class);
-          assertEquals("INSIGNIA_CREADA", dto.accion());
-          assertEquals("id-1", dto.id());
-          assertEquals("Nombre", dto.nombre());
+          assertEquals("MisionInsigniaEvento", leido.tipoEvento());
+          MisionInsigniaEvento dto = worker.convertValue(leido.descripcion(), MisionInsigniaEvento.class);
+          assertEquals("id-1", dto.insignias().get(0).id());
+          assertEquals("Nombre", dto.insignias().get(0).nombre());
           assertNotNull(java.time.Instant.parse(dto.ocurridoEn()));
           assertEquals(1, contador("ok"));
         });
